@@ -14,6 +14,8 @@ const { createLocalBoard } = require("../adapters/local-board.cjs");
 const { createSheetsBoardAdapter } = require("../adapters/sheets-board.cjs");
 const { sanitizeSignal } = require("../adapters/doorbell.cjs");
 const { dispatchBoardTask } = require("../lib/os-runtime.cjs");
+const { renderOmarchyTuiFrame } = require("../lib/omarchy-tui.cjs");
+const { createOmarchyDesktopServer } = require("../lib/omarchy-desktop.cjs");
 const { runInit, runDoctor } = require("../bin/aios.cjs");
 
 test("1. progressive folder resolution adapts strictly to what the user needs", () => {
@@ -80,7 +82,6 @@ test("2. end-to-end AI-first OS init + task board dispatch + doctor connects boa
     assert.match(constitution, /Build Straight Through/);
     assert.match(constitution, /\*\*twilio-mcp\*\*: rejected/);
 
-    // Queue a new task on the Task Board and dispatch it through the OS runtime
     const board = createLocalBoard({ boardDir: path.join(tmp, "board"), routerName: "Router" });
     const p2 = board.addTask({
       task: "Research vector index benchmarks and write summary",
@@ -101,7 +102,7 @@ test("2. end-to-end AI-first OS init + task board dispatch + doctor connects boa
           doorbellEvents.push(evt);
         },
       },
-      async runner({ task, agent, prompt }) {
+      async runner({ agent, prompt }) {
         assert.equal(agent, "gemini");
         assert.match(prompt, /AI-first OS Work Order: P2/);
         assert.match(prompt, /Connected Services: github \(mcp\)/);
@@ -200,8 +201,94 @@ test("4. doorbell strips any extra prose/approval fields and public template con
   const scan = scanDirectoryForSecrets(templateRoot);
   assert.equal(scan.clean, true, `Found secret pattern in template: ${JSON.stringify(scan.findings)}`);
 
-  for (const rel of ["bin/aios.cjs", "bin/fleet.cjs", "lib/os-runtime.cjs", "adapters/sheets-board.cjs", "adapters/local-board.cjs", "adapters/doorbell.cjs", "lib/ideology.cjs", "lib/vault-bootstrap.cjs", "aios.example.yaml", "README.md"]) {
+  for (const rel of [
+    "bin/aios.cjs",
+    "bin/fleet.cjs",
+    "lib/os-runtime.cjs",
+    "lib/omarchy-tui.cjs",
+    "lib/omarchy-desktop.cjs",
+    "lib/service-catalog.cjs",
+    "lib/voice-and-share.cjs",
+    "adapters/sheets-board.cjs",
+    "adapters/local-board.cjs",
+    "adapters/doorbell.cjs",
+    "lib/ideology.cjs",
+    "lib/vault-bootstrap.cjs",
+    "aios.example.yaml",
+    "README.md",
+  ]) {
     const content = fs.readFileSync(path.join(templateRoot, rel), "utf8");
     assert.doesNotMatch(content, /1r5hGpJiR2bFrouISy9Ujdf6tTBqPZ92XwSf8O5r4N4U|1KEK05vfEfYGEYtpdX5Tt7fO1RaYKWXrK|djcim|rentwasherssa/i);
+  }
+});
+
+test("5. Omarchy TUI & Desktop HUD support service dropdown connect, native voice-to-text routing, and 1-keystroke share", async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "ai-first-os-omarchy-"));
+  try {
+    const initRes = await runInit({
+      workspaceRoot: tmp,
+      answers: {
+        userName: "Sam",
+        primaryGoal: "Keyboard-first AI workflow",
+        roles: ["Builder"],
+        routerName: "Router",
+        agents: { router: "Router", builders: ["claude", "codex"], researchers: ["gemini"] },
+        boardMode: "local",
+        vaultPath: "./ContextVault",
+      },
+    });
+    const board = createLocalBoard({ boardDir: path.join(tmp, "board"), routerName: "Router" });
+
+    // Verify Omarchy TUI frame renders Waybar top bar, Task Board pane, and modals
+    const frame = renderOmarchyTuiFrame({
+      manifest: initRes.manifest,
+      tasks: board.listTasks(),
+      activeLane: "claude",
+      themeKey: "catppuccin",
+      modal: "palette",
+    });
+    assert.match(frame, /AI-first OS/);
+    assert.match(frame, /COMMAND PALETTE \[Space\]/);
+    assert.match(frame, /Catppuccin Mocha/);
+
+    // Verify Omarchy Desktop HTTP HUD API (connect service dropdown, voice-to-text, 1-step share to Antigravity)
+    const srv = createOmarchyDesktopServer({
+      workspaceRoot: tmp,
+      manifest: initRes.manifest,
+      board,
+    });
+    await new Promise(r => srv.listen(0, "127.0.0.1", r));
+    const base = `http://127.0.0.1:${srv.address().port}`;
+    try {
+      const connectRes = await fetch(`${base}/api/connect`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ serviceId: "vapi-rest" }),
+      }).then(r => r.json());
+      assert.equal(connectRes.ok, true);
+      assert.equal(connectRes.manifest.connections["vapi-rest"].type, "rest");
+
+      const voiceRes = await fetch(`${base}/api/voice`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ transcript: "Build the billing webhook handler and verify signature", to: "codex" }),
+      }).then(r => r.json());
+      assert.equal(voiceRes.ok, true);
+      assert.equal(voiceRes.boardRow.To, "codex");
+      assert.equal(fs.existsSync(voiceRes.filePath), true);
+
+      const shareRes = await fetch(`${base}/api/share`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ target: "agy", content: "Handoff P2 context to Antigravity", dryRun: true }),
+      }).then(r => r.json());
+      assert.equal(shareRes.ok, true);
+      assert.equal(shareRes.target, "agy");
+      assert.equal(fs.existsSync(shareRes.handoffFile), true);
+    } finally {
+      await new Promise(r => srv.close(r));
+    }
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
   }
 });

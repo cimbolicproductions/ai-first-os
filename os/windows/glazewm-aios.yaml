@@ -1,0 +1,46 @@
+# AI-first OS - Windows Tiling & Global Hotkeys (GlazeWM Compatible)
+# Pairs with `node bin/aios.cjs desktop` or `node bin/aios.cjs tui`
+
+general:
+  startup_commands:
+    - "shell-exec node bin/aios.cjs desktop"
+
+gaps:
+  inner_gap: "8px"
+  outer_gap:
+    top: "36px"
+    right: "8px"
+    bottom: "8px"
+    left: "8px"
+
+workspaces:
+  - name: "1"
+    display_name: "1:Board"
+  - name: "2"
+    display_name: "2:Claude"
+  - name: "3"
+    display_name: "3:Codex"
+  - name: "4"
+    display_name: "4:Gemini"
+  - name: "5"
+    display_name: "5:Antigravity"
+
+keybindings:
+  - commands: ["shell-exec node bin/aios.cjs desktop"]
+    bindings: ["alt+space"]
+  - commands: ["shell-exec wt.exe node bin/aios.cjs tui"]
+    bindings: ["alt+enter"]
+  - commands: ["focus --workspace 1"]
+    bindings: ["alt+1"]
+  - commands: ["focus --workspace 2"]
+    bindings: ["alt+2"]
+  - commands: ["focus --workspace 3"]
+    bindings: ["alt+3"]
+  - commands: ["focus --workspace 4"]
+    bindings: ["alt+4"]
+  - commands: ["focus --workspace 5"]
+    bindings: ["alt+5"]
+  - commands: ["shell-exec node bin/aios.cjs voice"]
+    bindings: ["alt+v"]
+  - commands: ["shell-exec node bin/aios.cjs share --to agy"]
+    bindings: ["alt+s"]

@@ -1,0 +1,9 @@
+# AI-first OS - macOS Hub Keybindings (skhd / Aerospace)
+alt - space : node bin/aios.cjs desktop
+alt - return : open -a Terminal.app "node bin/aios.cjs tui"
+alt - v : node bin/aios.cjs voice
+alt - s : node bin/aios.cjs share --to agy
+alt - 1 : node bin/aios.cjs board
+alt - 2 : open -a Terminal.app "claude"
+alt - 3 : open -a Terminal.app "codex"
+alt - 4 : open -a Terminal.app "gemini"

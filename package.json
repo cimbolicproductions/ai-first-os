@@ -1,7 +1,7 @@
 {
   "name": "ai-first-os",
-  "version": "1.1.0",
-  "description": "AI-first OS: Connect your AI services, external tools, and context vault to a shared realtime Task Board.",
+  "version": "1.2.0",
+  "description": "AI-first OS: Omarchy-style keyboard-first AI operating system with tiling shell, service dropdown, native voice-to-text, 1-keystroke share, and shared Task Board.",
   "private": false,
   "license": "MIT",
   "engines": {
@@ -13,7 +13,13 @@
     "fleet": "./bin/fleet.cjs"
   },
   "scripts": {
+    "start": "node bin/aios.cjs tui",
+    "tui": "node bin/aios.cjs tui",
+    "desktop": "node bin/aios.cjs desktop",
     "init": "node bin/aios.cjs init",
+    "connect": "node bin/aios.cjs connect",
+    "share": "node bin/aios.cjs share",
+    "voice": "node bin/aios.cjs voice",
     "board": "node bin/aios.cjs board",
     "task": "node bin/aios.cjs task",
     "run": "node bin/aios.cjs run",
