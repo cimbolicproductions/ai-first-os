@@ -1,0 +1,20 @@
+{
+  "name": "ai-first-os",
+  "version": "1.0.0",
+  "description": "AI-first OS: Personal Multi-Agent Control Plane & Context Vault Template",
+  "private": false,
+  "license": "MIT",
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "bin": {
+    "ai-first-os": "./bin/fleet.cjs",
+    "fleet": "./bin/fleet.cjs"
+  },
+  "scripts": {
+    "init": "node bin/fleet.cjs init",
+    "sync": "node bin/fleet.cjs sync",
+    "doctor": "node bin/fleet.cjs doctor",
+    "test": "node --test test/template.test.cjs"
+  }
+}
