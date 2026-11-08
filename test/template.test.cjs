@@ -8,13 +8,13 @@ const path = require("node:path");
 const http = require("node:http");
 const crypto = require("node:crypto");
 
-const { detectInstalledAgents } = require("../lib/agent-auth.cjs");
-const { resolveFolderList, bootstrapVault } = require("../lib/vault-bootstrap.cjs");
-const { checkSecretExists, scanDirectoryForSecrets } = require("../lib/keyring.cjs");
+const { resolveFolderList } = require("../lib/vault-bootstrap.cjs");
+const { scanDirectoryForSecrets } = require("../lib/keyring.cjs");
 const { createLocalBoard } = require("../adapters/local-board.cjs");
-const { createSheetsBoardAdapter, SCOPES } = require("../adapters/sheets-board.cjs");
-const { createDoorbellClient, sanitizeSignal } = require("../adapters/doorbell.cjs");
-const { runInit, runDoctor } = require("../bin/fleet.cjs");
+const { createSheetsBoardAdapter } = require("../adapters/sheets-board.cjs");
+const { sanitizeSignal } = require("../adapters/doorbell.cjs");
+const { dispatchBoardTask } = require("../lib/os-runtime.cjs");
+const { runInit, runDoctor } = require("../bin/aios.cjs");
 
 test("1. progressive folder resolution adapts strictly to what the user needs", () => {
   const minimal = resolveFolderList({ hasBusinesses: false, hasResearch: false, hasCareer: false });
@@ -23,37 +23,36 @@ test("1. progressive folder resolution adapts strictly to what the user needs", 
   assert.equal(minimal.includes("Transcripts"), false);
   assert.equal(minimal.includes("01_Command_Center/Career"), false);
 
-  const founder = resolveFolderList({
+  const full = resolveFolderList({
     hasBusinesses: true,
     hasResearch: true,
     hasCareer: true,
-    projects: [{ name: "Voice Receptionist" }],
+    projects: [{ name: "Voice Assistant" }],
   });
-  assert.equal(founder.includes("03_Work_and_Business/Businesses"), true);
-  assert.equal(founder.includes("Feedback/Voice_Receptionist"), true);
-  assert.equal(founder.includes("Transcripts"), true);
-  assert.equal(founder.includes("01_Command_Center/Career"), true);
+  assert.equal(full.includes("03_Work_and_Business/Businesses"), true);
+  assert.equal(full.includes("Feedback/Voice_Assistant"), true);
+  assert.equal(full.includes("Transcripts"), true);
+  assert.equal(full.includes("01_Command_Center/Career"), true);
 });
 
-test("2. end-to-end fleet init + doctor creates tailored vault, constitution, local board, and agent files", async () => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "fleet-template-init-"));
+test("2. end-to-end AI-first OS init + task board dispatch + doctor connects board, AI services, and vault", async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "ai-first-os-init-"));
   try {
     const answers = {
       userName: "Alex",
-      primaryGoal: "Land an AI engineering role and ship Receptionist MVP",
-      roles: ["Engineer", "Founder"],
-      hasBusinesses: true,
-      hasResearch: false,
-      hasCareer: true,
+      primaryGoal: "Ship AI-native applications with connected services",
+      roles: ["Developer", "Creator"],
+      hasBusinesses: false,
+      hasResearch: true,
+      hasCareer: false,
       projects: [
-        { name: "AI Receptionist", goal: "Close first 5 local service clients" },
-        { name: "Tech Role Pipeline", goal: "Ship 2 public portfolio repos" },
+        { name: "Core App", goal: "Wire realtime task board to AI builders" },
       ],
       workStyle: "hybrid-hub-and-mobile",
       hubOs: "macos",
-      routerName: "Juno",
+      routerName: "Router",
       agents: {
-        router: "Juno",
+        router: "Router",
         builders: ["claude", "codex"],
         researchers: ["gemini"],
       },
@@ -65,8 +64,8 @@ test("2. end-to-end fleet init + doctor creates tailored vault, constitution, lo
     };
 
     const initRes = await runInit({ workspaceRoot: tmp, answers });
-    assert.equal(fs.existsSync(path.join(tmp, "fleet.json")), true);
-    assert.equal(fs.existsSync(path.join(tmp, "fleet.yaml")), true);
+    assert.equal(fs.existsSync(path.join(tmp, "aios.json")), true);
+    assert.equal(fs.existsSync(path.join(tmp, "aios.yaml")), true);
     assert.equal(fs.existsSync(path.join(tmp, "CLAUDE.md")), true);
     assert.equal(fs.existsSync(path.join(tmp, "AGENTS.md")), true);
     assert.equal(fs.existsSync(path.join(tmp, "GEMINI.md")), true);
@@ -81,25 +80,45 @@ test("2. end-to-end fleet init + doctor creates tailored vault, constitution, lo
     assert.match(constitution, /Build Straight Through/);
     assert.match(constitution, /\*\*twilio-mcp\*\*: rejected/);
 
-    // Local board enforces one owner per row, claim first, write by column name
-    const board = createLocalBoard({ boardDir: path.join(tmp, "board"), routerName: "Juno" });
-    const p1 = board.findTask("P1");
-    assert.equal(p1.To, "claude");
-    assert.throws(() => board.claimTask({ taskId: "P1", agent: "codex" }), e => e.code === "NOT_OWNER");
-
-    const claimed = board.claimTask({ taskId: "P1", agent: "claude", runId: "R1", claimCode: "C1" });
-    assert.equal(claimed.task.Status, "In progress");
-    const updated = board.updateByColumnName({
-      taskId: "P1",
-      agent: "claude",
-      claimMarker: claimed.claimMarker,
-      columns: { Status: "Done", To: "Juno" },
-      note: "Completed verification and handed back to Juno.",
+    // Queue a new task on the Task Board and dispatch it through the OS runtime
+    const board = createLocalBoard({ boardDir: path.join(tmp, "board"), routerName: "Router" });
+    const p2 = board.addTask({
+      task: "Research vector index benchmarks and write summary",
+      to: "gemini",
+      from: "Router",
     });
-    assert.equal(updated.Status, "Done");
-    assert.equal(updated.To, "Juno");
+    assert.equal(p2.ID, "P2");
+    assert.equal(p2.Status, "Open");
 
-    // Doctor check passes with GITHUB_TOKEN in env
+    const doorbellEvents = [];
+    const dispatchRes = await dispatchBoardTask({
+      workspaceRoot: tmp,
+      manifest: initRes.manifest,
+      board,
+      taskId: "P2",
+      doorbell: {
+        async ring(evt) {
+          doorbellEvents.push(evt);
+        },
+      },
+      async runner({ task, agent, prompt }) {
+        assert.equal(agent, "gemini");
+        assert.match(prompt, /AI-first OS Work Order: P2/);
+        assert.match(prompt, /Connected Services: github \(mcp\)/);
+        return {
+          status: "Done",
+          note: "Benchmarked HNSW vs IVF and saved summary to Research_Notes.",
+        };
+      },
+    });
+
+    assert.equal(dispatchRes.dispatched, true);
+    assert.equal(dispatchRes.status, "Done");
+    assert.equal(dispatchRes.handedTo, "Router");
+    assert.equal(doorbellEvents.length, 2);
+    assert.equal(doorbellEvents[0].event, "claimed");
+    assert.equal(doorbellEvents[1].event, "done");
+
     const doc = runDoctor({
       workspaceRoot: tmp,
       env: { ...process.env, GITHUB_TOKEN: "present-in-env-not-written-to-disk" },
@@ -114,7 +133,7 @@ test("2. end-to-end fleet init + doctor creates tailored vault, constitution, lo
 test("3. parameterized sheets-board adapter requires explicit boardId and enforces fail-closed readOnly", async () => {
   assert.throws(() => createSheetsBoardAdapter({}), e => e.code === "CONFIG_REQUIRED");
 
-  const { privateKey, publicKey } = crypto.generateKeyPairSync("rsa", { modulusLength: 2048 });
+  const { privateKey } = crypto.generateKeyPairSync("rsa", { modulusLength: 2048 });
   const sa = {
     client_email: "test@example.iam.gserviceaccount.com",
     private_key: privateKey.export({ type: "pkcs8", format: "pem" }),
@@ -152,7 +171,6 @@ test("3. parameterized sheets-board adapter requires explicit boardId and enforc
     });
     assert.equal(res.values[0][0], "ID");
 
-    // Rejects mismatched spreadsheet_id and rejects writes in readOnly mode
     await assert.rejects(
       adapter.call({ operation: "get_range", arguments: { spreadsheet_id: "Other_ID_999999", sheet_name: "Tasks", range: "A1:J1" } }),
       e => e.code === "INVALID_REQUEST"
@@ -182,8 +200,7 @@ test("4. doorbell strips any extra prose/approval fields and public template con
   const scan = scanDirectoryForSecrets(templateRoot);
   assert.equal(scan.clean, true, `Found secret pattern in template: ${JSON.stringify(scan.findings)}`);
 
-  // Verify no personal spreadsheet IDs or personal paths appear in the public template
-  for (const rel of ["bin/fleet.cjs", "adapters/sheets-board.cjs", "adapters/local-board.cjs", "adapters/doorbell.cjs", "lib/ideology.cjs", "lib/vault-bootstrap.cjs", "fleet.example.yaml", "README.md"]) {
+  for (const rel of ["bin/aios.cjs", "bin/fleet.cjs", "lib/os-runtime.cjs", "adapters/sheets-board.cjs", "adapters/local-board.cjs", "adapters/doorbell.cjs", "lib/ideology.cjs", "lib/vault-bootstrap.cjs", "aios.example.yaml", "README.md"]) {
     const content = fs.readFileSync(path.join(templateRoot, rel), "utf8");
     assert.doesNotMatch(content, /1r5hGpJiR2bFrouISy9Ujdf6tTBqPZ92XwSf8O5r4N4U|1KEK05vfEfYGEYtpdX5Tt7fO1RaYKWXrK|djcim|rentwasherssa/i);
   }

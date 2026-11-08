@@ -8,7 +8,7 @@ const HEADERS = ["ID", "Task", "To", "Status", "Latest note", "Order", "From", "
 const STATUSES = new Set(["Open", "In progress", "Waiting on User", "Waiting on Dom", "Done"]);
 
 /**
- * Local file-backed board (JSON state + rendered Markdown table) implementing
+ * Local file-backed Task Board (JSON state + rendered Markdown table) implementing
  * the exact same protocol as the Google Sheets board:
  * - Write by column name, never position
  * - One owner per row, claim first with [RUN <id> <runId> <claimCode>]
@@ -25,7 +25,7 @@ function createLocalBoard({ boardDir, routerName = "Router", now = () => new Dat
 
   function renderMarkdown(state) {
     const lines = [
-      `# Shared Agent Tasks Board (Local Mode)`,
+      `# AI-first OS Task Board (Local Mode)`,
       ``,
       `Router: **${routerName}** | Canonical file: \`board.json\``,
       ``,
@@ -50,7 +50,7 @@ function createLocalBoard({ boardDir, routerName = "Router", now = () => new Dat
         : [
             {
               ID: "P1",
-              Task: "Verify agent fleet setup and run doctor check",
+              Task: "Verify AI-first OS setup and run doctor check",
               To: "claude",
               Status: "Open",
               "Latest note": `${routerName} ${todayStr()}: Initial onboarding task.`,
@@ -81,6 +81,45 @@ function createLocalBoard({ boardDir, routerName = "Router", now = () => new Dat
     fs.writeFileSync(tmp, JSON.stringify(state, null, 2) + "\n", "utf8");
     fs.renameSync(tmp, jsonPath);
     fs.writeFileSync(mdPath, renderMarkdown(state), "utf8");
+  }
+
+  function listTasks({ status, to } = {}) {
+    const state = readState();
+    return state.rows
+      .filter(r => {
+        if (status && r.Status.toLowerCase() !== String(status).toLowerCase()) return false;
+        if (to && r.To.toLowerCase() !== String(to).toLowerCase()) return false;
+        return true;
+      })
+      .map(r => structuredClone(r));
+  }
+
+  function addTask({ id, task, to = "claude", from = routerName, order, specFile = "none", note }) {
+    if (!task || !String(task).trim()) {
+      throw Object.assign(new Error("Task description is required"), { code: "INVALID_TASK" });
+    }
+    const state = readState();
+    const nextNum = state.rows.length + 1;
+    const taskId = id || `P${nextNum}`;
+    if (state.rows.some(r => r.ID === taskId)) {
+      throw Object.assign(new Error(`Task ID already exists: ${taskId}`), { code: "ID_COLLISION" });
+    }
+    const stamp = todayStr();
+    const newRow = {
+      ID: taskId,
+      Task: String(task).trim(),
+      To: String(to).trim(),
+      Status: "Open",
+      "Latest note": `${from} ${stamp}: ${note || "Queued on task board."}`,
+      Order: String(order ?? nextNum),
+      From: String(from).trim(),
+      Updated: stamp,
+      Created: stamp,
+      "Spec file": String(specFile || "none"),
+    };
+    state.rows.push(newRow);
+    saveState(state);
+    return structuredClone(newRow);
   }
 
   function findTask(id) {
@@ -136,7 +175,17 @@ function createLocalBoard({ boardDir, routerName = "Router", now = () => new Dat
     return structuredClone(row);
   }
 
-  return { HEADERS, jsonPath, mdPath, initBoard, findTask, claimTask, updateByColumnName };
+  return {
+    HEADERS,
+    jsonPath,
+    mdPath,
+    initBoard,
+    listTasks,
+    addTask,
+    findTask,
+    claimTask,
+    updateByColumnName,
+  };
 }
 
 module.exports = { HEADERS, STATUSES, createLocalBoard };

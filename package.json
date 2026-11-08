@@ -1,20 +1,25 @@
 {
   "name": "ai-first-os",
-  "version": "1.0.0",
-  "description": "AI-first OS: Personal Multi-Agent Control Plane & Context Vault Template",
+  "version": "1.1.0",
+  "description": "AI-first OS: Connect your AI services, external tools, and context vault to a shared realtime Task Board.",
   "private": false,
   "license": "MIT",
   "engines": {
     "node": ">=22.0.0"
   },
   "bin": {
-    "ai-first-os": "./bin/fleet.cjs",
+    "ai-first-os": "./bin/aios.cjs",
+    "aios": "./bin/aios.cjs",
     "fleet": "./bin/fleet.cjs"
   },
   "scripts": {
-    "init": "node bin/fleet.cjs init",
-    "sync": "node bin/fleet.cjs sync",
-    "doctor": "node bin/fleet.cjs doctor",
+    "init": "node bin/aios.cjs init",
+    "board": "node bin/aios.cjs board",
+    "task": "node bin/aios.cjs task",
+    "run": "node bin/aios.cjs run",
+    "watch": "node bin/aios.cjs watch",
+    "sync": "node bin/aios.cjs sync",
+    "doctor": "node bin/aios.cjs doctor",
     "test": "node --test test/template.test.cjs"
   }
 }
