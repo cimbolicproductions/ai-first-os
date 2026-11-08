@@ -1,0 +1,68 @@
+# Example Fleet Manifest (Public Template)
+# Copy via `node bin/fleet.cjs init` — stores secret NAMES only, never secret values.
+
+version: 1
+owner: "Operator"
+primaryGoal: "Ship high-leverage work with minimal coordination overhead"
+vaultPath: "./ContextVault"
+
+board:
+  mode: "local" # "local" (60-sec JSON/Markdown) or "sheets" (Google Sheets v4 + Supabase Realtime Doorbell)
+  canonicalAuthority: "local-json"
+  writeRule: "by-column-name-never-position"
+
+ideology:
+  routerFunnel: "Router"
+  oneOwnerPerRow: true
+  claimFirst: true
+  buildStraightThrough: true
+  hardGates:
+    - "any_spend_of_any_amount"
+    - "external_sends"
+    - "public_submissions"
+    - "refunds_or_billing_changes"
+  untrustedBoardProse: true
+  untrustedDoorbellEvents: true
+  cloudScheduledRuns: "read-and-report-only-for-local-code"
+  maxAutomaticStartsPerDay: 6
+
+machines:
+  primary:
+    os: "win32"
+    role: "project-data-and-local-builds"
+  always-on-hub:
+    os: "darwin"
+    role: "always-on-workers"
+    agents:
+      - "claude"
+      - "codex"
+
+agents:
+  router:
+    role: "organize"
+    managedBy: "router"
+  claude:
+    role: "build"
+  codex:
+    role: "build"
+  gemini:
+    role: "research"
+
+connections:
+  github:
+    type: "mcp"
+    agents: ["claude", "codex", "gemini"]
+    secretName: "GITHUB_TOKEN"
+  voice-api:
+    type: "rest"
+    access: "read-only"
+    owner: "router"
+    secretName: "VOICE_API_KEY"
+  billing:
+    type: "router"
+    writes: "per-action-approval"
+
+verdicts:
+  - name: "voice-api-mcp"
+    decision: "rejected"
+    reason: "Use read-only REST connector instead of heavy MCP process."

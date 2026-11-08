@@ -1,0 +1,22 @@
+# User-specific generated manifests & local state
+fleet.yaml
+fleet.json
+.mcp.json
+CLAUDE.md
+AGENTS.md
+GEMINI.md
+ContextVault/
+board/
+runs/
+state/
+
+# Secrets & credentials (never commit)
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*service-account*.json
+*credentials*.json
+.gitleaks.json
+node_modules/
