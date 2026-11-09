@@ -580,6 +580,20 @@ test("11. work reaches agents without a shell, and silent auth failures are caug
   assert.deepEqual(tried, ["codex", "claude"]);
   assert.equal(res.status, "Done");
 
+  // A build keeps its write access even after passing through a researcher.
+  board.addTask({ task: "Long chain", to: "codex" });
+  const modes = [];
+  await dispatchBoardTask({
+    workspaceRoot: dir, manifest, board, notices, availability: only("codex", "gemini", "antigravity"),
+    runner: async ({ agent, mode }) => {
+      modes.push([agent, mode]);
+      if (agent !== "antigravity") throw Object.assign(new Error("down"), { code: "AGENT_UNAVAILABLE" });
+      return { status: "Done", note: "ok" };
+    },
+  });
+  assert.deepEqual(modes.at(-1), ["antigravity", "write"]);
+  assert.equal(board.getMeta("P2").kind, "build");
+
   // IDE-only harness: honest, never a fake Done.
   const launched = {};
   const ide = await defaultCliRunner({

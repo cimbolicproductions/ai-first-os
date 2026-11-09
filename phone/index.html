@@ -22,7 +22,8 @@
   button.soft { background:var(--card); color:var(--text); border:1px solid var(--line); }
   button:disabled { opacity:.4; }
   #send { width:100%; margin-top:10px; }
-  #agents { display:flex; gap:8px; overflow-x:auto; margin-top:12px; padding-bottom:4px; }
+  #agents { display:flex; gap:8px; overflow-x:auto; margin-top:12px; scrollbar-width:none; }
+  #agents::-webkit-scrollbar { display:none; }
   #agents button { flex:none; padding:7px 13px; font-size:14px; font-weight:500; background:var(--card); color:var(--text); border:1px solid var(--line); }
   #agents button.on { background:var(--text); color:var(--bg); }
   #msg { min-height:22px; color:var(--muted); font-size:15px; margin:10px 0 0; }
@@ -72,6 +73,7 @@
   let vapidKey = null;
   let sending = false;
   let lastAgents = "";
+  let lastAsks = "";
   const answered = new Set();
 
   async function call(method, route, body) {
@@ -147,7 +149,8 @@
       const asks = open.filter(n => n.choices && n.choices.length);
       const info = open.filter(n => !(n.choices && n.choices.length));
       $("waitingWrap").hidden = !asks.length;
-      if (!$("waiting").querySelector("button:disabled")) $("waiting").replaceChildren(...asks.map(noticeCard));
+      const askKey = asks.map(n => n.id).join();
+      if (askKey !== lastAsks) { lastAsks = askKey; $("waiting").replaceChildren(...asks.map(noticeCard)); }
       $("updatesWrap").hidden = !info.length;
       $("updates").replaceChildren(...info.slice(-5).reverse().map(noticeCard));
       $("today").textContent = s.summary ? s.summary.headline : "Nothing yet.";
