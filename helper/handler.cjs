@@ -11,7 +11,8 @@
 
 const API = "https://api.supabase.com";
 const SIGN_IN_PORT = 53682;
-const REDIRECT_URI = `http://127.0.0.1:${SIGN_IN_PORT}/callback`;
+// Supabase accepts 127.0.0.1 at registration but refuses it at sign-in; only the word localhost may skip HTTPS.
+const REDIRECT_URI = `http://localhost:${SIGN_IN_PORT}/callback`;
 const REQUIRED_SCOPES = Object.freeze([
   "Organizations: Read",
   "Projects: Read and Write",

@@ -853,6 +853,7 @@ test("15b. every downloader gets Supabase set up behind one sign-in, and the app
     },
   });
   assert.deepEqual(helper.config().body, { ok: true, configured: true, clientId: "client-1", redirectUri: REDIRECT_URI, port: 53682 });
+  assert.equal(REDIRECT_URI, "http://localhost:53682/callback");
   assert.equal(JSON.stringify(helper.config()).includes("app-secret-value"), false);
 
   assert.equal((await helper.exchange({ ...request, redirect_uri: "https://evil.example/callback" })).body.code, "INVALID_REDIRECT");
@@ -884,6 +885,7 @@ test("15b. every downloader gets Supabase set up behind one sign-in, and the app
     },
   });
   assert.equal(token, "user-token");
+  assert.equal(new URL(seen.redirect_uri).hostname, "localhost", "Supabase refuses any other plain-HTTP return address");
   assert.equal(seen.code_challenge_method, "S256");
   assert.equal(seen.exchangeUrl, "https://helper.example/api/exchange");
   assert.equal(crypto.createHash("sha256").update(seen.exchangeBody.code_verifier).digest("base64url"), seen.code_challenge, "the verifier matches what was promised");
