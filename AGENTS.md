@@ -22,6 +22,7 @@ This repository is **AI-first OS** (`https://github.com/cimbolicproductions/ai-f
 - `phone/`: The static phone page, published from the `gh-pages` branch. Republish that branch when this folder changes.
 - `helper/`: The small server function that keeps the Supabase app secret and finishes sign-ins. Deployed separately to Vercel.
 - `scripts/build-installer.cjs`: Builds the one-click installers.
+- `scripts/build-brand.cjs`: Draws the logo and the loading animation from one set of geometry.
 - `product.json`: Product-level switches the owner sets (`phoneAppUrl`, `signInHelperUrl`).
 - `os/`: Window tiling and hotkey configs.
 

@@ -1083,6 +1083,41 @@ test("18. first run: three windows once, zero-config defaults, and the local app
   assert.equal((await (await post("/api/roles", { role: "builder", agent: "muse" })).json()).ok, false, "a personal agent cannot be a builder");
 });
 
+test("18b. the logo animation lines up, loops cleanly, and is served everywhere it is used", async t => {
+  const brand = require("../scripts/build-brand.cjs");
+  const outDir = tempDir(t);
+  const built = brand.build({ outputs: outDir });
+  const gif = fs.readFileSync(built.gif);
+  assert.equal(gif.toString("ascii", 0, 6), "GIF89a");
+  assert.ok(gif.includes(Buffer.from("NETSCAPE2.0")), "it loops");
+  assert.equal(fs.readFileSync(built.logo[0]).subarray(1, 4).toString("ascii"), "PNG");
+  assert.ok(gif.length < 200000, "small enough to load instantly");
+
+  const orbiting = brand.stateAt(10);
+  assert.equal(orbiting.from, null, "no line while the moon is moving");
+  const landed = brand.stateAt(brand.ORBIT_FRAMES + brand.SETTLE_FRAMES + brand.DRAW_FRAMES);
+  assert.equal(landed.from, 0);
+  assert.equal(landed.to, 1, "the line reaches all the way through");
+  assert.equal(landed.angle, brand.stateAt(0).angle, "the moon stops exactly on the line");
+  assert.deepEqual([...brand.renderFrame(64, brand.TOTAL_FRAMES - 1)], [...brand.renderFrame(64, 0)], "the end meets the start");
+
+  for (const name of ["loading.gif", "logo.png"]) assert.equal(fs.existsSync(path.resolve(__dirname, "..", "phone", name)), true);
+
+  const server = createDesktopServer({ workspaceRoot: tempDir(t), detect: () => detectedAgents(), introOptions: { homeDir: os.tmpdir(), env: {}, platform: "linux" } });
+  await new Promise(r => server.listen(0, "127.0.0.1", r));
+  t.after(() => new Promise(r => server.close(r)));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const served = await fetch(`${base}/brand/loading.gif`);
+  assert.equal(served.headers.get("content-type"), "image/gif");
+  assert.equal((await fetch(`${base}/brand/logo.png`)).headers.get("content-type"), "image/png");
+  assert.match(await (await fetch(base)).text(), /brand\/loading\.gif/, "the welcome window uses it before setup exists");
+  assert.match(buildDesktopHtml(), /brand\/loading\.gif/);
+
+  const { base: relayBase } = await makeRelay(t);
+  assert.equal((await fetch(`${relayBase}/loading.gif`)).headers.get("content-type"), "image/gif");
+  assert.match(await (await fetch(relayBase)).text(), /loading\.gif/);
+});
+
 test("19. daily summary in plain words, with undo only where undo is real", async t => {
   const { dir, manifest, board, notices } = makeOS(t);
   assert.equal(buildDailySummary({ board, notices }).headline, "Nothing has run yet today.");

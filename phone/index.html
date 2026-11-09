@@ -7,6 +7,8 @@
 <meta name="theme-color" content="#0b0b0d">
 <title>AI-first OS</title>
 <link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="logo.png">
+<link rel="apple-touch-icon" href="logo.png">
 <style>
   :root { --bg:#0b0b0d; --text:#f5f5f7; --muted:#98989f; --line:#2c2c2e; --card:#1c1c1e; --go:#34c759; }
   @media (prefers-color-scheme: light) { :root { --bg:#fbfbfd; --text:#1d1d1f; --muted:#6e6e73; --line:#d2d2d7; --card:#fff; } }
@@ -35,12 +37,21 @@
   #alerts { width:100%; margin-top:24px; }
   #nolink { margin:30vh 0; text-align:center; color:var(--muted); }
   .hide-label { position:absolute; left:-9999px; }
+  #boot { min-height:75vh; display:flex; align-items:center; justify-content:center; }
+  #boot img { width:112px; height:112px; border-radius:26px; display:block; }
+  #brand { width:24px; height:24px; border-radius:6px; flex:none; margin-right:4px; }
 </style>
 </head>
 <body>
+<div id="boot" role="status" aria-label="Loading" hidden>
+  <picture>
+    <source srcset="logo.png" media="(prefers-reduced-motion: reduce)">
+    <img src="loading.gif" alt="">
+  </picture>
+</div>
 <p id="nolink" hidden>Open your personal link to use this page.</p>
 <main id="app" hidden>
-  <div id="home"><span id="dot"></span><span id="homeText">Checking your computer…</span></div>
+  <div id="home"><img id="brand" src="logo.png" alt="AI-first OS"><span id="dot"></span><span id="homeText">Checking your computer…</span></div>
   <label class="hide-label" for="ask">What do you need?</label>
   <textarea id="ask" placeholder="What do you need?"></textarea>
   <div id="agents"></div>
@@ -67,7 +78,7 @@
   const token = saved.get("k");
   const $ = id => document.getElementById(id);
   if (!backend || !token) { $("nolink").hidden = false; return; }
-  $("app").hidden = false;
+  $("boot").hidden = false;
 
   let target = null;
   let vapidKey = null;
@@ -194,7 +205,7 @@
     }
   };
 
-  refresh();
+  refresh().finally(() => { $("boot").hidden = true; $("app").hidden = false; });
   setInterval(refresh, 8000);
   document.addEventListener("visibilitychange", () => { if (!document.hidden) refresh(); });
 })();
