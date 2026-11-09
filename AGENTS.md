@@ -19,9 +19,10 @@ This repository is **AI-first OS** (`https://github.com/cimbolicproductions/ai-f
 - `lib/backend-provision.cjs`: Creates the user's backend behind one sign-in. Stops at any possible cost.
 - `lib/autostart.cjs`, `lib/web-push.cjs`, `lib/daily-summary.cjs`, `lib/vault-options.cjs`, `lib/vault-bootstrap.cjs`, `lib/keyring.cjs`, `lib/ideology.cjs`, `lib/workspace.cjs`.
 - `adapters/local-board.cjs`, `adapters/sheets-board.cjs`, `adapters/doorbell.cjs`: Boards and the content-free doorbell.
-- `phone/`: The static phone page.
+- `phone/`: The static phone page, published from the `gh-pages` branch. Republish that branch when this folder changes.
+- `helper/`: The small server function that keeps the Supabase app secret and finishes sign-ins. Deployed separately to Vercel.
 - `scripts/build-installer.cjs`: Builds the one-click installers.
-- `product.json`: Product-level switches the owner sets (`phoneAppUrl`, `supabaseOAuth`).
+- `product.json`: Product-level switches the owner sets (`phoneAppUrl`, `signInHelperUrl`).
 - `os/`: Window tiling and hotkey configs.
 
 ## Rules When Building Here

@@ -1,4 +1,4 @@
 {
   "phoneAppUrl": "https://cimbolicproductions.github.io/ai-first-os/",
-  "supabaseOAuth": null
+  "signInHelperUrl": "https://ai-first-os-signin.vercel.app"
 }

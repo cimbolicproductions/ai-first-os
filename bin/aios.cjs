@@ -365,6 +365,34 @@ function phoneLinkFor(manifest) {
   return buildPhoneLink({ pageUrl, relayUrl: manifest.backend.relayUrl, phoneToken });
 }
 
+const COST_QUESTION = "Creating your phone connection on this Supabase account may add to its bill. Create it anyway?";
+const phoneSession = {};
+
+/** One path for the desktop button and the terminal command. Never throws plain errors at a person. */
+async function connectPhone({ manifest, root, approveCost = false, confirmCost = null }) {
+  const alreadyCloud = manifest.backend && manifest.backend.kind !== "local";
+  if (!alreadyCloud) {
+    let result;
+    try {
+      result = await connectBackend({
+        product: loadProductConfig(),
+        storeSecret,
+        session: phoneSession,
+        confirmCost: confirmCost || (async () => approveCost),
+      });
+    } catch (err) {
+      return { ok: false, code: err.code || "CONNECT_FAILED", message: err.message };
+    }
+    if (!result.ok) {
+      return { ok: false, code: result.code, message: result.message || null, question: result.code === "COST_NOT_APPROVED" ? COST_QUESTION : null };
+    }
+    manifest.backend = result.backend;
+    saveManifest(root, manifest);
+    delete phoneSession.accessToken;
+  }
+  return { ok: true, link: phoneLinkFor(manifest), newlyConnected: !alreadyCloud };
+}
+
 async function runWatch(root, manifest) {
   const service = await startHomeServices({
     workspaceRoot: root,
@@ -595,28 +623,19 @@ if (require.main === module) {
         await runWatch(root, manifest);
         return;
       }
-      if (!manifest.backend) {
-        const result = await connectBackend({
-          product: loadProductConfig(),
-          storeSecret,
-          confirmCost: ({ question }) => confirmInTerminal(question),
-        });
-        if (!result.ok) {
-          process.stdout.write(
-            result.code === "OWNER_SETUP_NEEDED"
-              ? "Phone access from anywhere is not switched on for this copy yet. For now, `aios phone --here` works on your Wi-Fi.\n"
-              : result.code === "COST_NOT_APPROVED"
-                ? "Nothing was created, and nothing was charged.\n"
-                : `Could not finish: ${result.code}\n`
-          );
-          process.exitCode = 1;
-          return;
-        }
-        manifest.backend = result.backend;
-        saveManifest(root, manifest);
+      const result = await connectPhone({ manifest, root, confirmCost: ({ question }) => confirmInTerminal(question) });
+      if (!result.ok) {
+        process.stdout.write(
+          result.code === "OWNER_SETUP_NEEDED"
+            ? "Phone access from anywhere is not switched on for this copy yet. For now, `aios phone --here` works on your Wi-Fi.\n"
+            : result.code === "COST_NOT_APPROVED"
+              ? "Nothing was created, and nothing was charged.\n"
+              : `${result.message || "Could not finish setting up your phone."}\n`
+        );
+        process.exitCode = 1;
+        return;
       }
-      const link = phoneLinkFor(manifest);
-      process.stdout.write(link ? `${link}\n` : "Your backend is ready, but the phone page has not been published yet.\n");
+      process.stdout.write(`${result.link}\n`);
       return;
     }
 
@@ -659,6 +678,17 @@ if (require.main === module) {
         manifest,
         board,
         onSaveManifest: saver,
+        phone: {
+          status: current => ({ connected: Boolean(current.backend && current.backend.kind !== "local"), link: current.backend && current.backend.kind !== "local" ? phoneLinkFor(current) : null }),
+          async connect(current, { approveCost }) {
+            const result = await connectPhone({ manifest: current, root, approveCost });
+            if (result.ok && result.newlyConnected) {
+              service?.stop();
+              service = await startHomeServices({ workspaceRoot: root, manifest: current, saveManifest: saver });
+            }
+            return result;
+          },
+        },
         async onIntroComplete({ selection, detected }) {
           const made = await runInit({ workspaceRoot: root, answers: profileFromIntro(selection, detected), detected });
           service = await startHomeServices({ workspaceRoot: root, manifest: made.manifest, saveManifest: saver });

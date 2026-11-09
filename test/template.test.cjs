@@ -833,6 +833,132 @@ test("15. backend setup: quiet on a free plan, stops before any cost, keys go to
   assert.match(edge, /Deno\.serve/);
 });
 
+test("15b. every downloader gets Supabase set up behind one sign-in, and the app secret stays on the helper", async t => {
+  const { createHelper, REDIRECT_URI, REQUIRED_SCOPES } = require("../helper/handler.cjs");
+  assert.ok(REQUIRED_SCOPES.length >= 5);
+  const verifier = "v".repeat(48);
+  const request = { code: "abc", code_verifier: verifier, redirect_uri: REDIRECT_URI };
+
+  const off = createHelper({ env: {}, fetchFn: async () => assert.fail("never called") });
+  assert.equal(off.config().body.configured, false);
+  assert.equal((await off.exchange(request)).status, 503);
+
+  const upstream = [];
+  const secretEnv = { SUPABASE_OAUTH_CLIENT_ID: "client-1", SUPABASE_OAUTH_CLIENT_SECRET: "app-secret-value" };
+  const helper = createHelper({
+    env: secretEnv,
+    fetchFn: async (url, init) => {
+      upstream.push({ url, init });
+      return new Response(JSON.stringify({ access_token: "user-token", refresh_token: "long-lived" }), { status: 200 });
+    },
+  });
+  assert.deepEqual(helper.config().body, { ok: true, configured: true, clientId: "client-1", redirectUri: REDIRECT_URI, port: 53682 });
+  assert.equal(JSON.stringify(helper.config()).includes("app-secret-value"), false);
+
+  assert.equal((await helper.exchange({ ...request, redirect_uri: "https://evil.example/callback" })).body.code, "INVALID_REDIRECT");
+  assert.equal((await helper.exchange({ ...request, code_verifier: "short" })).body.code, "INVALID_REQUEST");
+  assert.equal(upstream.length, 0, "bad requests never reach Supabase");
+
+  const good = await helper.exchange(request);
+  assert.deepEqual(good.body, { ok: true, access_token: "user-token" }, "only the short-lived token comes back");
+  assert.match(upstream[0].init.headers.authorization, /^Basic /);
+  assert.equal(String(upstream[0].init.body).includes("app-secret-value"), false);
+
+  const rejected = createHelper({ env: secretEnv, fetchFn: async () => new Response("detail with internals", { status: 400 }) });
+  assert.deepEqual((await rejected.exchange(request)).body, { ok: false, code: "SIGN_IN_REJECTED" });
+
+  // The real browser round trip, with Supabase and the helper stood in for.
+  const { signInToSupabase, connectBackend } = require("../lib/backend-provision.cjs");
+  const seen = {};
+  const token = await signInToSupabase({
+    oauth: { clientId: "client-1", port: 53691, helperUrl: "https://helper.example/" },
+    open: async url => {
+      const u = new URL(url);
+      Object.assign(seen, Object.fromEntries(u.searchParams));
+      await fetch(`${u.searchParams.get("redirect_uri")}?code=the-code&state=${u.searchParams.get("state")}`);
+    },
+    fetchFn: async (url, init) => {
+      seen.exchangeUrl = url;
+      seen.exchangeBody = JSON.parse(init.body);
+      return new Response(JSON.stringify({ ok: true, access_token: "user-token" }), { status: 200 });
+    },
+  });
+  assert.equal(token, "user-token");
+  assert.equal(seen.code_challenge_method, "S256");
+  assert.equal(seen.exchangeUrl, "https://helper.example/api/exchange");
+  assert.equal(crypto.createHash("sha256").update(seen.exchangeBody.code_verifier).digest("base64url"), seen.code_challenge, "the verifier matches what was promised");
+  assert.equal(seen.exchangeBody.code, "the-code");
+
+  await assert.rejects(
+    signInToSupabase({
+      oauth: { clientId: "c", port: 53692, helperUrl: "https://h.example" },
+      open: async url => { const u = new URL(url); await fetch(`${u.searchParams.get("redirect_uri")}?code=x&state=forged`); },
+    }),
+    e => e.code === "SIGN_IN_FAILED",
+    "a forged return is refused"
+  );
+
+  const product = { signInHelperUrl: "https://helper.example" };
+  const stray = await connectBackend({
+    product, env: { SUPABASE_ACCESS_TOKEN: "someone-elses" }, storeSecret() {},
+    provision: async () => assert.fail("an unrelated token must never be used"),
+    fetchFn: async () => new Response(JSON.stringify({ ok: true, configured: false })),
+  });
+  assert.equal(stray.code, "OWNER_SETUP_NEEDED");
+  const notYet = await connectBackend({ product, env: {}, storeSecret() {}, fetchFn: async () => new Response(JSON.stringify({ ok: true, configured: false })) });
+  assert.equal(notYet.code, "OWNER_SETUP_NEEDED");
+  const down = await connectBackend({ product, env: {}, storeSecret() {}, fetchFn: async () => { throw new Error("offline"); } });
+  assert.equal(down.code, "HELPER_UNREACHABLE");
+
+  let signIns = 0;
+  const session = {};
+  const flow = {
+    product, env: {}, session, storeSecret() {},
+    fetchFn: async () => new Response(JSON.stringify({ ok: true, configured: true, clientId: "client-1", port: 53682 })),
+    signIn: async ({ oauth }) => { signIns++; assert.equal(oauth.helperUrl, product.signInHelperUrl); return "user-token"; },
+  };
+  const first = await connectBackend({ ...flow, provision: async ({ accessToken }) => { assert.equal(accessToken, "user-token"); return { ok: false, code: "COST_NOT_APPROVED" }; } });
+  assert.equal(first.code, "COST_NOT_APPROVED");
+  const second = await connectBackend({ ...flow, provision: async () => ({ ok: true, backend: { kind: "supabase" } }) });
+  assert.equal(second.ok, true);
+  assert.equal(signIns, 1, "answering a cost question does not mean signing in twice");
+
+  // A full free-tier account is explained, not reported as a code.
+  await assert.rejects(
+    provisionSupabase({
+      accessToken: "t",
+      storeSecret() {},
+      fetchFn: async (url, init) => {
+        const route = `${init.method} ${new URL(url).pathname}`;
+        if (route === "GET /v1/organizations") return new Response(JSON.stringify([{ slug: "o" }]));
+        if (route === "GET /v1/organizations/o") return new Response(JSON.stringify({ plan: "free" }));
+        if (route === "GET /v1/projects") return new Response("[]");
+        return new Response("The free project limit has been reached", { status: 402 });
+      },
+    }),
+    e => e.code === "PROJECT_LIMIT" && /no room/.test(e.message)
+  );
+
+  // The desktop button: a plain question for cost, then the link.
+  const env2 = makeOS(t);
+  const asked = [];
+  const server = createDesktopServer({
+    workspaceRoot: env2.dir, manifest: env2.manifest, board: env2.board, runner: doneRunner(),
+    phone: {
+      status: () => ({ connected: false, link: null }),
+      connect: async (_m, { approveCost }) => { asked.push(approveCost); return approveCost ? { ok: true, link: "https://p.example/#k=1" } : { ok: false, code: "COST_NOT_APPROVED", question: "May add to its bill?" }; },
+    },
+  });
+  await new Promise(r => server.listen(0, "127.0.0.1", r));
+  t.after(() => new Promise(r => server.close(r)));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const press = approveCost => fetch(`${base}/api/phone/connect`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ approveCost }) }).then(r => r.json());
+  assert.equal((await press(false)).question, "May add to its bill?");
+  assert.equal((await press(true)).link, "https://p.example/#k=1");
+  assert.deepEqual(asked, [false, true]);
+  assert.match(buildDesktopHtml(), /Use your phone/);
+});
+
 test("16. autostart on every OS, without administrator rights", t => {
   const options = { nodePath: "/n/node", cliPath: "/a/aios.cjs", workspaceRoot: "/w s", homeDir: "/h" };
   const win = planAutostart({ ...options, platform: "win32" });
