@@ -14,8 +14,8 @@ const { createLocalBoard } = require("../adapters/local-board.cjs");
 const { createSheetsBoardAdapter } = require("../adapters/sheets-board.cjs");
 const { sanitizeSignal } = require("../adapters/doorbell.cjs");
 const { dispatchBoardTask } = require("../lib/os-runtime.cjs");
-const { renderOmarchyTuiFrame } = require("../lib/omarchy-tui.cjs");
-const { createOmarchyDesktopServer } = require("../lib/omarchy-desktop.cjs");
+const { renderTuiFrame } = require("../lib/shell-tui.cjs");
+const { createDesktopServer } = require("../lib/desktop-hud.cjs");
 const { runInit, runDoctor } = require("../bin/aios.cjs");
 
 test("1. progressive folder resolution adapts strictly to what the user needs", () => {
@@ -205,8 +205,8 @@ test("4. doorbell strips any extra prose/approval fields and public template con
     "bin/aios.cjs",
     "bin/fleet.cjs",
     "lib/os-runtime.cjs",
-    "lib/omarchy-tui.cjs",
-    "lib/omarchy-desktop.cjs",
+    "lib/shell-tui.cjs",
+    "lib/desktop-hud.cjs",
     "lib/service-catalog.cjs",
     "lib/voice-and-share.cjs",
     "adapters/sheets-board.cjs",
@@ -222,8 +222,8 @@ test("4. doorbell strips any extra prose/approval fields and public template con
   }
 });
 
-test("5. Omarchy TUI & Desktop HUD support service dropdown connect, native voice-to-text routing, and 1-keystroke share", async () => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "ai-first-os-omarchy-"));
+test("5. TUI & Desktop HUD support service dropdown connect, native voice-to-text routing, and 1-keystroke share", async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "ai-first-os-shell-"));
   try {
     const initRes = await runInit({
       workspaceRoot: tmp,
@@ -239,8 +239,8 @@ test("5. Omarchy TUI & Desktop HUD support service dropdown connect, native voic
     });
     const board = createLocalBoard({ boardDir: path.join(tmp, "board"), routerName: "Router" });
 
-    // Verify Omarchy TUI frame renders Waybar top bar, Task Board pane, and modals
-    const frame = renderOmarchyTuiFrame({
+    // Verify TUI frame renders top bar, Task Board pane, and modals
+    const frame = renderTuiFrame({
       manifest: initRes.manifest,
       tasks: board.listTasks(),
       activeLane: "claude",
@@ -251,8 +251,8 @@ test("5. Omarchy TUI & Desktop HUD support service dropdown connect, native voic
     assert.match(frame, /COMMAND PALETTE \[Space\]/);
     assert.match(frame, /Catppuccin Mocha/);
 
-    // Verify Omarchy Desktop HTTP HUD API (connect service dropdown, voice-to-text, 1-step share to Antigravity)
-    const srv = createOmarchyDesktopServer({
+    // Verify Desktop HTTP HUD API (connect service dropdown, voice-to-text, 1-step share to Antigravity)
+    const srv = createDesktopServer({
       workspaceRoot: tmp,
       manifest: initRes.manifest,
       board,

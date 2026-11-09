@@ -10,8 +10,8 @@ const { renderAgentInstructions } = require("../lib/ideology.cjs");
 const { validateSecretName, checkSecretExists, scanDirectoryForSecrets } = require("../lib/keyring.cjs");
 const { createLocalBoard } = require("../adapters/local-board.cjs");
 const { dispatchBoardTask, watchTaskBoard } = require("../lib/os-runtime.cjs");
-const { startOmarchyTui } = require("../lib/omarchy-tui.cjs");
-const { createOmarchyDesktopServer, launchFramelessAppWindow } = require("../lib/omarchy-desktop.cjs");
+const { startTui } = require("../lib/shell-tui.cjs");
+const { createDesktopServer, launchFramelessAppWindow } = require("../lib/desktop-hud.cjs");
 const { connectServiceFromCatalog, SERVICE_DROPDOWN_CATALOG } = require("../lib/service-catalog.cjs");
 const { captureVoiceNative, saveVoiceDumpToInbox, shareToTarget } = require("../lib/voice-and-share.cjs");
 
@@ -493,7 +493,7 @@ if (require.main === module) {
         routerName: manifest.ideology?.routerFunnel || "Router",
       });
       board.initBoard();
-      startOmarchyTui({
+      startTui({
         workspaceRoot: root,
         manifest,
         board,
@@ -518,7 +518,7 @@ if (require.main === module) {
         routerName: manifest.ideology?.routerFunnel || "Router",
       });
       board.initBoard();
-      const srv = createOmarchyDesktopServer({
+      const srv = createDesktopServer({
         workspaceRoot: root,
         manifest,
         board,
@@ -530,7 +530,7 @@ if (require.main === module) {
       });
       await new Promise(r => srv.listen(0, "127.0.0.1", r));
       const url = `http://127.0.0.1:${srv.address().port}`;
-      process.stdout.write(`AI-first OS Omarchy Desktop running at ${url}\n`);
+      process.stdout.write(`AI-first OS Desktop running at ${url}\n`);
       launchFramelessAppWindow(url);
       return;
     }
@@ -596,10 +596,10 @@ if (require.main === module) {
 
     process.stdout.write(
       [
-        "AI-first OS (Omarchy-Style Keyboard-First AI Operating System)",
+        "AI-first OS (Keyboard-First AI Operating System)",
         "Usage:",
-        "  node bin/aios.cjs                   Launch full-screen Omarchy TUI shell (runs init first if needed)",
-        "  node bin/aios.cjs desktop           Launch frameless Omarchy Desktop HUD window + global hotkeys",
+        "  node bin/aios.cjs                   Launch full-screen TUI shell (runs init first if needed)",
+        "  node bin/aios.cjs desktop           Launch frameless Desktop HUD window + global hotkeys",
         "  node bin/aios.cjs init              Detect/sign in to AI accounts & run progressive setup interview",
         "  node bin/aios.cjs connect [service] Connect a service from the plug-and-play dropdown catalog",
         "  node bin/aios.cjs share [text] --to <agy|claude|codex|gemini|board>  1-step share to any AI tool",

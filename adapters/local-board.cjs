@@ -14,10 +14,76 @@ const STATUSES = new Set(["Open", "In progress", "Waiting on User", "Waiting on 
  * - One owner per row, claim first with [RUN <id> <runId> <claimCode>]
  * - Atomic temp-file write + readback verification
  */
+function sleepSync(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
 function createLocalBoard({ boardDir, routerName = "Router", now = () => new Date() }) {
   const root = path.resolve(boardDir);
   const jsonPath = path.join(root, "board.json");
   const mdPath = path.join(root, "BOARD.md");
+  const lockPath = path.join(root, "board.lock");
+  const activityPath = path.join(root, "activity.jsonl");
+
+  /** The service, desktop and terminal all write here; one writer at a time. */
+  function withLock(fn) {
+    fs.mkdirSync(root, { recursive: true });
+    const deadline = Date.now() + 10000;
+    let held = false;
+    while (!held) {
+      try {
+        fs.closeSync(fs.openSync(lockPath, "wx"));
+        held = true;
+      } catch (err) {
+        if (err.code !== "EEXIST" && err.code !== "EPERM") throw err;
+        try {
+          if (Date.now() - fs.statSync(lockPath).mtimeMs > 15000) fs.rmSync(lockPath, { force: true });
+        } catch {
+          // The holder released it between the two calls.
+        }
+        if (Date.now() > deadline) {
+          throw Object.assign(new Error("The board is busy. Try again in a moment."), { code: "BOARD_BUSY" });
+        }
+        sleepSync(15);
+      }
+    }
+    try {
+      return fn();
+    } finally {
+      fs.rmSync(lockPath, { force: true });
+    }
+  }
+
+  function logActivity(entry) {
+    fs.appendFileSync(activityPath, JSON.stringify({ at: new Date(now()).toISOString(), ...entry }) + "\n", "utf8");
+  }
+
+  function listActivity() {
+    if (!fs.existsSync(activityPath)) return [];
+    return fs
+      .readFileSync(activityPath, "utf8")
+      .split(/\r?\n/)
+      .filter(Boolean)
+      .flatMap(line => {
+        try {
+          return [JSON.parse(line)];
+        } catch {
+          return [];
+        }
+      });
+  }
+
+  function renameWithRetry(from, to) {
+    for (let attempt = 0; ; attempt++) {
+      try {
+        fs.renameSync(from, to);
+        return;
+      } catch (err) {
+        if (!["EPERM", "EACCES", "EBUSY"].includes(err.code) || attempt >= 8) throw err;
+        sleepSync(25 * (attempt + 1));
+      }
+    }
+  }
 
   function todayStr() {
     return new Date(now()).toISOString().slice(0, 10);
@@ -39,13 +105,14 @@ function createLocalBoard({ boardDir, routerName = "Router", now = () => new Dat
     return lines.join("\n") + "\n";
   }
 
-  function initBoard(starterRows = []) {
+  function initBoard(starterRows = [], { empty = false } = {}) {
     fs.mkdirSync(root, { recursive: true });
     if (fs.existsSync(jsonPath)) return readState();
     const initial = {
       version: 1,
       headers: HEADERS,
-      rows: starterRows.length
+      meta: {},
+      rows: starterRows.length || empty
         ? starterRows
         : [
             {
@@ -79,8 +146,23 @@ function createLocalBoard({ boardDir, routerName = "Router", now = () => new Dat
     fs.mkdirSync(root, { recursive: true });
     const tmp = `${jsonPath}.${crypto.randomUUID()}.tmp`;
     fs.writeFileSync(tmp, JSON.stringify(state, null, 2) + "\n", "utf8");
-    fs.renameSync(tmp, jsonPath);
+    renameWithRetry(tmp, jsonPath);
     fs.writeFileSync(mdPath, renderMarkdown(state), "utf8");
+  }
+
+  /** Software-owned facts about a row. Never set from board prose. */
+  function getMeta(id) {
+    return structuredClone(readState().meta?.[id] || {});
+  }
+
+  function setMeta(id, patch) {
+    return withLock(() => {
+      const state = readState();
+      state.meta = state.meta || {};
+      state.meta[id] = { ...(state.meta[id] || {}), ...patch };
+      saveState(state);
+      return structuredClone(state.meta[id]);
+    });
   }
 
   function listTasks({ status, to } = {}) {
@@ -94,7 +176,11 @@ function createLocalBoard({ boardDir, routerName = "Router", now = () => new Dat
       .map(r => structuredClone(r));
   }
 
-  function addTask({ id, task, to = "claude", from = routerName, order, specFile = "none", note }) {
+  function addTask(input) {
+    return withLock(() => addTaskLocked(input));
+  }
+
+  function addTaskLocked({ id, task, to = "claude", from = routerName, order, specFile = "none", note, meta = null }) {
     if (!task || !String(task).trim()) {
       throw Object.assign(new Error("Task description is required"), { code: "INVALID_TASK" });
     }
@@ -118,7 +204,12 @@ function createLocalBoard({ boardDir, routerName = "Router", now = () => new Dat
       "Spec file": String(specFile || "none"),
     };
     state.rows.push(newRow);
+    if (meta) {
+      state.meta = state.meta || {};
+      state.meta[taskId] = meta;
+    }
     saveState(state);
+    logActivity({ type: "queued", row: taskId, to: newRow.To, task: newRow.Task });
     return structuredClone(newRow);
   }
 
@@ -129,7 +220,11 @@ function createLocalBoard({ boardDir, routerName = "Router", now = () => new Dat
     return matches[0] ? structuredClone(matches[0]) : null;
   }
 
-  function claimTask({ taskId, agent, runId = crypto.randomBytes(4).toString("hex"), claimCode = crypto.randomBytes(6).toString("hex") }) {
+  function claimTask(input) {
+    return withLock(() => claimTaskLocked(input));
+  }
+
+  function claimTaskLocked({ taskId, agent, runId = crypto.randomBytes(4).toString("hex"), claimCode = crypto.randomBytes(6).toString("hex") }) {
     const state = readState();
     const row = state.rows.find(r => r.ID === taskId);
     if (!row) throw Object.assign(new Error("Task missing"), { code: "TASK_MISSING" });
@@ -143,10 +238,15 @@ function createLocalBoard({ boardDir, routerName = "Router", now = () => new Dat
     row.Updated = stamp;
     row["Latest note"] = `${row["Latest note"] ? row["Latest note"] + "\n" : ""}${agent} ${stamp}: ${marker}`;
     saveState(state);
+    logActivity({ type: "started", row: taskId, to: agent, task: row.Task });
     return { task: structuredClone(row), claimMarker: marker };
   }
 
-  function updateByColumnName({ taskId, agent, claimMarker, columns = {}, note }) {
+  function updateByColumnName(input) {
+    return withLock(() => updateByColumnNameLocked(input));
+  }
+
+  function updateByColumnNameLocked({ taskId, agent, claimMarker, columns = {}, note }) {
     const state = readState();
     const row = state.rows.find(r => r.ID === taskId);
     if (!row) throw Object.assign(new Error("Task missing"), { code: "TASK_MISSING" });
@@ -172,6 +272,7 @@ function createLocalBoard({ boardDir, routerName = "Router", now = () => new Dat
     }
     row.Updated = stamp;
     saveState(state);
+    if (columns.Status) logActivity({ type: columns.Status, row: taskId, to: agent, task: row.Task });
     return structuredClone(row);
   }
 
@@ -185,6 +286,10 @@ function createLocalBoard({ boardDir, routerName = "Router", now = () => new Dat
     findTask,
     claimTask,
     updateByColumnName,
+    getMeta,
+    setMeta,
+    listActivity,
+    logActivity,
   };
 }
 

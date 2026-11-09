@@ -5,10 +5,10 @@ This repository is **AI-first OS** (`https://github.com/cimbolicproductions/ai-f
 ## Architecture & File Map
 
 - `bin/aios.cjs` (`bin/fleet.cjs` alias): Main CLI entrypoint (`tui`, `desktop`, `init`, `connect`, `share`, `voice`, `board`, `task`, `run`, `watch`, `sync`, `doctor`).
-- `lib/omarchy-tui.cjs`: Full-screen ANSI tiling terminal workspace (`[1:Board] [2:Claude] [3:Codex] [4:Gemini] [5:Antigravity]`, Command Palette, Service Dropdown, Share modal, Voice trigger, Omarchy themes).
-- `lib/omarchy-desktop.cjs`: Frameless Desktop HUD HTTP server + `--app` window launcher + Web Speech / OS voice + live task board controls.
+- `lib/shell-tui.cjs`: Full-screen ANSI tiling terminal workspace (`[1:Board] [2:Claude] [3:Codex] [4:Gemini] [5:Antigravity]`, Command Palette, Service Dropdown, Share modal, Voice trigger, Omarchy themes).
+- `lib/desktop-hud.cjs`: Frameless Desktop HUD HTTP server + `--app` window launcher + Web Speech / OS voice + live task board controls.
 - `lib/os-runtime.cjs`: Task Board work-order builder (`buildWorkOrderPrompt`), single-owner row claim & CLI dispatcher (`dispatchBoardTask`), and continuous board watcher (`watchTaskBoard`).
-- `lib/service-catalog.cjs`: Plug-and-play dropdown catalog (`SERVICE_DROPDOWN_CATALOG`) and Omarchy color themes (`OMARCHY_THEMES`).
+- `lib/service-catalog.cjs`: Plug-and-play dropdown catalog (`SERVICE_DROPDOWN_CATALOG`) and Omarchy color themes (`THEMES`).
 - `lib/voice-and-share.cjs`: Native OS voice-to-text (`captureVoiceNative`, `saveVoiceDumpToInbox`) and 1-keystroke handoff (`shareToTarget`) to Antigravity, Claude Code, Codex, Gemini, or the Task Board.
 - `lib/agent-auth.cjs`: Auto-detects `claude`, `codex`, `gemini`, and `antigravity` (`Antigravity.exe` / `antigravity-ide` / `agy`) across `PATH` and standard OS install paths.
 - `lib/ideology.cjs` & `lib/vault-bootstrap.cjs`: Generates the progressive `ContextVault/`, `OPERATING_CONSTITUTION.md`, and workspace agent instruction files.

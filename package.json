@@ -1,7 +1,7 @@
 {
   "name": "ai-first-os",
   "version": "1.2.0",
-  "description": "AI-first OS: Omarchy-style keyboard-first AI operating system with tiling shell, service dropdown, native voice-to-text, 1-keystroke share, and shared Task Board.",
+  "description": "AI-first OS: keyboard-first AI operating system with tiling shell, service dropdown, native voice-to-text, 1-keystroke share, and shared Task Board.",
   "private": false,
   "license": "MIT",
   "engines": {
