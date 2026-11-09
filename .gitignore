@@ -11,3 +11,5 @@ fleet.yaml
 .mcp.json
 ContextVault/
 board/
+dist/
+.aios/

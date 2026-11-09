@@ -229,6 +229,7 @@ function createLocalBoard({ boardDir, routerName = "Router", now = () => new Dat
     const row = state.rows.find(r => r.ID === taskId);
     if (!row) throw Object.assign(new Error("Task missing"), { code: "TASK_MISSING" });
     if (row.Status === "Done") throw Object.assign(new Error("Task already done"), { code: "TASK_DONE" });
+    if (row.Status === "In progress") throw Object.assign(new Error(`${taskId} is already running.`), { code: "TASK_BUSY" });
     if (row.To.toLowerCase() !== String(agent).toLowerCase()) {
       throw Object.assign(new Error(`Row ${taskId} is assigned to ${row.To}, not ${agent}`), { code: "NOT_OWNER" });
     }

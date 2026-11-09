@@ -1,7 +1,7 @@
 {
   "name": "ai-first-os",
   "version": "1.2.0",
-  "description": "AI-first OS: keyboard-first AI operating system with tiling shell, service dropdown, native voice-to-text, 1-keystroke share, and shared Task Board.",
+  "description": "AI-first OS: one board for all your AI agents, with role routing, a builder and auditor loop, and a phone front door.",
   "private": false,
   "license": "MIT",
   "engines": {
@@ -26,6 +26,7 @@
     "watch": "node bin/aios.cjs watch",
     "sync": "node bin/aios.cjs sync",
     "doctor": "node bin/aios.cjs doctor",
-    "test": "node --test test/template.test.cjs"
+    "test": "node --test test/template.test.cjs",
+    "build:installer": "node scripts/build-installer.cjs"
   }
 }

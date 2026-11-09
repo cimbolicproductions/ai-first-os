@@ -1,29 +1,39 @@
-# AGENTS.md - AI-first OS Repository Guide (Codex / Builders)
+# AGENTS.md - AI-first OS Repository Guide
 
-This repository is **AI-first OS** (`https://github.com/cimbolicproductions/ai-first-os`), a zero-dependency Node.js (`v22+`) Omarchy-style keyboard-first AI operating system.
+This repository is **AI-first OS** (`https://github.com/cimbolicproductions/ai-first-os`), a zero-dependency Node.js (`v22+`) keyboard-first multi-agent control plane.
 
-## Architecture & File Map
+## File Map
 
-- `bin/aios.cjs` (`bin/fleet.cjs` alias): Main CLI entrypoint (`tui`, `desktop`, `init`, `connect`, `share`, `voice`, `board`, `task`, `run`, `watch`, `sync`, `doctor`).
-- `lib/shell-tui.cjs`: Full-screen ANSI tiling terminal workspace (`[1:Board] [2:Claude] [3:Codex] [4:Gemini] [5:Antigravity]`, Command Palette, Service Dropdown, Share modal, Voice trigger, Omarchy themes).
-- `lib/desktop-hud.cjs`: Frameless Desktop HUD HTTP server + `--app` window launcher + Web Speech / OS voice + live task board controls.
-- `lib/os-runtime.cjs`: Task Board work-order builder (`buildWorkOrderPrompt`), single-owner row claim & CLI dispatcher (`dispatchBoardTask`), and continuous board watcher (`watchTaskBoard`).
-- `lib/service-catalog.cjs`: Plug-and-play dropdown catalog (`SERVICE_DROPDOWN_CATALOG`) and Omarchy color themes (`THEMES`).
-- `lib/voice-and-share.cjs`: Native OS voice-to-text (`captureVoiceNative`, `saveVoiceDumpToInbox`) and 1-keystroke handoff (`shareToTarget`) to Antigravity, Claude Code, Codex, Gemini, or the Task Board.
-- `lib/agent-auth.cjs`: Auto-detects `claude`, `codex`, `gemini`, and `antigravity` (`Antigravity.exe` / `antigravity-ide` / `agy`) across `PATH` and standard OS install paths.
-- `lib/ideology.cjs` & `lib/vault-bootstrap.cjs`: Generates the progressive `ContextVault/`, `OPERATING_CONSTITUTION.md`, and workspace agent instruction files.
-- `lib/keyring.cjs`: Cross-platform OS keyring secret-name validator and repository secret-hygiene scanner.
-- `adapters/local-board.cjs`: Atomic JSON + Markdown Task Board (`board/board.json` + `board/BOARD.md`), write-by-column-name, claim-first protocol.
-- `adapters/sheets-board.cjs` & `adapters/doorbell.cjs`: Parameterized Google Sheets API v4 board adapter and content-free Supabase Realtime Broadcast WebSocket doorbell.
-- `os/`: Window tiling & global hotkey configs for Linux/Omarchy (`os/linux/hyprland-aios.conf`), Windows (`os/windows/glazewm-aios.yaml`), and macOS (`os/macos/skhdrc-aios`).
+- `bin/aios.cjs` (`bin/fleet.cjs` alias): CLI entrypoint.
+- `lib/harness-registry.cjs`: The open harness list. One entry per agent: finding it, sign-in, running work, models, hotkey.
+- `lib/agent-auth.cjs`: Detects harnesses and sign-in state from the registry.
+- `lib/roles.cjs`: Default role slate, routing, substitution, audit pairing.
+- `lib/os-runtime.cjs`: Work orders, dispatch, report parsing, `answerNotice`, board watcher.
+- `lib/notices.cjs`: Every question or update for a person. All surfaces read this one book.
+- `lib/audit-loop.cjs`: The Audit action and findings-to-fix-tasks loop.
+- `lib/first-run.cjs`, `lib/first-run-page.cjs`: The three-window introduction.
+- `lib/desktop-hud.cjs`, `lib/shell-tui.cjs`: Desktop app and terminal shell.
+- `lib/relay-core.cjs`: Phone/computer meeting point. Web-standard APIs only, no imports, because it also runs in a Supabase Edge Function.
+- `lib/relay-host.cjs`: File store, local server, and the generated Edge Function.
+- `lib/cloud-link.cjs`, `lib/home-service.cjs`: Home machine heartbeat, intake, outbox, background service.
+- `lib/backend-provision.cjs`: Creates the user's backend behind one sign-in. Stops at any possible cost.
+- `lib/autostart.cjs`, `lib/web-push.cjs`, `lib/daily-summary.cjs`, `lib/vault-options.cjs`, `lib/vault-bootstrap.cjs`, `lib/keyring.cjs`, `lib/ideology.cjs`, `lib/workspace.cjs`.
+- `adapters/local-board.cjs`, `adapters/sheets-board.cjs`, `adapters/doorbell.cjs`: Boards and the content-free doorbell.
+- `phone/`: The static phone page.
+- `scripts/build-installer.cjs`: Builds the one-click installers.
+- `product.json`: Product-level switches the owner sets (`phoneAppUrl`, `supabaseOAuth`).
+- `os/`: Window tiling and hotkey configs.
 
-## Rules When Building in This Repo
+## Rules When Building Here
 
-1. **Zero external npm dependencies** in runtime modules (use Node `v22+` built-ins: `node:fs`, `node:http`, `node:crypto`, `node:child_process`, `node:test`, global `fetch`, global `WebSocket`).
-2. **Build straight through:** Work in a branch/worktree, run `node --test test/template.test.cjs`, and keep all 5 test suites green.
-3. **Public template hygiene:** Never commit secrets, `.env` files, personal spreadsheet IDs, or machine-specific usernames. Test suite #4 scans the entire repo automatically.
+1. **Zero runtime npm dependencies.** Use Node 22+ built-ins.
+2. **Never put board or user text on a command line.** Prompts go over stdin or into a work-order file. See `buildSpawnPlan`.
+3. **The doorbell stays content-free:** row, event, from, machine, timestamp only.
+4. **User-facing words are plain.** No key formats, dashboards, or settings pages. A missing choice becomes a notice, not a failure.
+5. **Public repo hygiene.** No secrets, `.env` files, personal IDs, or machine usernames. Test 4 scans the repo.
+6. Hard gates stay hard: no spending, external sends, or public submissions without the owner's explicit approval.
 
-## Verification Command
+## Verification
 
 ```bash
 node --test test/template.test.cjs

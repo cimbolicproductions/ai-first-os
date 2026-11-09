@@ -7,3 +7,5 @@ alt - 1 : node bin/aios.cjs board
 alt - 2 : open -a Terminal.app "claude"
 alt - 3 : open -a Terminal.app "codex"
 alt - 4 : open -a Terminal.app "gemini"
+alt - 5 : open -a Terminal.app "agy"
+alt - 6 : open -a "Cursor"

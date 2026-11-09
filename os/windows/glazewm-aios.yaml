@@ -24,6 +24,8 @@ workspaces:
     display_name: "4:Gemini"
   - name: "5"
     display_name: "5:Antigravity"
+  - name: "6"
+    display_name: "6:Cursor"
 
 keybindings:
   - commands: ["shell-exec node bin/aios.cjs desktop"]
@@ -40,6 +42,8 @@ keybindings:
     bindings: ["alt+4"]
   - commands: ["focus --workspace 5"]
     bindings: ["alt+5"]
+  - commands: ["focus --workspace 6"]
+    bindings: ["alt+6"]
   - commands: ["shell-exec node bin/aios.cjs voice"]
     bindings: ["alt+v"]
   - commands: ["shell-exec node bin/aios.cjs share --to agy"]

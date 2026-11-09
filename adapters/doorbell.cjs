@@ -39,7 +39,7 @@ function sanitizeSignal(input) {
   const machine = String(input.machine || "").trim().toLowerCase();
   const ts = input.ts ? String(input.ts).trim() : new Date().toISOString();
 
-  if (!/^P[1-9]\d{0,3}$/.test(row)) throw new DoorbellError("INVALID_SIGNAL", "Invalid row ID.");
+  if (!/^(P[1-9]\d{0,3}|R[1-9]\d{0,5})$/.test(row)) throw new DoorbellError("INVALID_SIGNAL", "Invalid row ID.");
   if (!ALLOWED_EVENTS.has(event)) throw new DoorbellError("INVALID_SIGNAL", "Unsupported doorbell event.");
   if (!/^[a-z0-9_-]{2,32}$/.test(from)) throw new DoorbellError("INVALID_SIGNAL", "Invalid actor identifier.");
   if (!/^[a-z0-9_-]{2,32}$/.test(machine)) throw new DoorbellError("INVALID_SIGNAL", "Invalid machine identifier.");
@@ -218,7 +218,21 @@ function createDoorbellClient({
   return { connect, waitUntilJoined, publish, close, isJoined: () => joined };
 }
 
+/** Adapts a doorbell client to the ring() the runtime calls. Never throws. */
+function createRinger(client) {
+  return {
+    async ring(signal) {
+      try {
+        return client.publish(signal);
+      } catch {
+        return { sent: false };
+      }
+    },
+  };
+}
+
 module.exports = {
+  createRinger,
   ALLOWED_EVENTS,
   CHANNEL_TOPIC,
   BROADCAST_EVENT,
