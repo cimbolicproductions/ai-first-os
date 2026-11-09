@@ -38,5 +38,5 @@ This repository is **AI-first OS** (`https://github.com/cimbolicproductions/ai-f
 ## Verification
 
 ```bash
-node --test test/template.test.cjs
+npm test
 ```

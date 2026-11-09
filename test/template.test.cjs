@@ -365,33 +365,35 @@ test("6. the old product name is gone and the license is real", () => {
   assert.match(fs.readFileSync(path.join(root, "README.md"), "utf8"), /License/);
 });
 
-test("7. harness registry is open: Cursor slots in, sign-in states are honest, keys stay one move", () => {
+test("7. harness registry is open: Cursor slots in, sign-in states are honest, keys stay one move", t => {
   assert.deepEqual(laneList().map(l => `${l.key}:${l.id}`), ["1:board", "2:claude", "3:codex", "4:gemini", "5:antigravity", "6:cursor"]);
   for (const h of HARNESSES) {
     assert.ok(h.run && h.signIn && h.models.length && h.authFiles, `${h.id} is complete`);
   }
 
-  const home = "/nowhere";
-  const probe = found => (cmd, args) => {
-    if (cmd === "where.exe" || cmd === "which") {
-      return found.includes(args[0]) ? { status: 0, stdout: `/bin/${args[0]}\n` } : { status: 1, stdout: "" };
-    }
-    if (/\/bin\/cursor-agent/.test(cmd) || args.join(" ").includes("cursor-agent")) return { status: 0, stdout: "Logged in as someone" };
-    return { status: 1, stdout: "" };
+  const home = tempDir(t);
+  const detectFrom = (folder, binary) => {
+    const bin = path.join(home, folder);
+    fs.mkdirSync(bin);
+    if (binary) fs.writeFileSync(path.join(bin, binary), "", { mode: 0o700 });
+    return detectInstalledAgents({
+      homeDir: home,
+      env: { PATH: bin },
+      execProbe: () => ({ status: 0, stdout: "Logged in as someone" }),
+    }).find(a => a.id === "cursor");
   };
-  const names = spec => spec.worker.binaries;
   const cursor = findHarness("cursor");
-  const withWorker = detectInstalledAgents({ execProbe: probe([names(cursor)[0]]), homeDir: home, env: {} }).find(a => a.id === "cursor");
+  const withWorker = detectFrom("worker", cursor.worker.binaries[0]);
   assert.equal(withWorker.installed, true);
   assert.equal(withWorker.headless, true);
   assert.equal(withWorker.state, "signed-in");
 
-  const ideOnly = detectInstalledAgents({ execProbe: probe([cursor.ide.binaries[0]]), homeDir: home, env: {} }).find(a => a.id === "cursor");
+  const ideOnly = detectFrom("ide", cursor.ide.binaries[0]);
   assert.equal(ideOnly.installed, true);
   assert.equal(ideOnly.headless, false);
   assert.equal(ideOnly.state, "installed");
 
-  const none = detectInstalledAgents({ execProbe: probe([]), homeDir: home, env: {} }).find(a => a.id === "cursor");
+  const none = detectFrom("empty");
   assert.equal(none.state, "missing");
   assert.equal(none.loginCommand, null);
 });
@@ -644,8 +646,9 @@ test("12. phone front door: a plain request becomes a board row, rings content-f
   // Sent while the computer is off: nothing is lost.
   assert.equal((await phone("POST", "request", { text: "Book the follow-up" })).ok, true);
   assert.equal((await phone("POST", "request", { text: "Check the invoices", to: "gemini" })).ok, true);
+  assert.equal((await phone("POST", "request", { text: "Send an email to the team", to: "gemini" })).ok, true);
   status = await phone("GET", "status");
-  assert.equal(status.queued, 2);
+  assert.equal(status.queued, 3);
   assert.deepEqual(Object.keys(rings[0]).sort(), ["event", "from", "machine", "row"]);
   assert.equal(JSON.stringify(rings).includes("follow-up"), false, "the doorbell carries no content");
   assert.ok(sanitizeSignal({ ...rings[0] }));
@@ -653,9 +656,11 @@ test("12. phone front door: a plain request becomes a board row, rings content-f
   const link = makeLink(t, base, env);
   assert.equal(await link.tick(), true);
   const rows = env.board.listTasks();
-  assert.equal(rows.length, 2);
+  assert.equal(rows.length, 3);
   assert.equal(rows[0].To, "muse");
   assert.equal(rows[1].To, "gemini");
+  assert.equal(rows[2].To, "muse", "a chosen agent does not bypass the external action gate");
+  assert.equal(env.board.getMeta(rows[2].ID).intent, "external_action");
   assert.equal(env.board.getMeta(rows[0].ID).source, "phone");
   assert.match(buildWorkOrderPrompt(rows[0], env.manifest, env.board.getMeta(rows[0].ID)), /untrusted data/);
 
@@ -664,7 +669,7 @@ test("12. phone front door: a plain request becomes a board row, rings content-f
   assert.equal(status.home.online, true);
 
   await link.tick();
-  assert.equal(env.board.listTasks().length, 2, "a request is taken only once");
+  assert.equal(env.board.listTasks().length, 3, "a request is taken only once");
 
   const url = buildPhoneLink({ pageUrl: "https://a.example/p/", relayUrl: "https://b.example", phoneToken: "abc" });
   assert.equal(new URL(url).search, "", "the key stays out of any server's logs");
@@ -1148,16 +1153,17 @@ test("19. daily summary in plain words, with undo only where undo is real", asyn
 
 test("20. push wakes the phone with no content, and the signature verifies", async () => {
   const vapid = createVapidKeys();
-  const header = vapidHeader({ endpoint: "https://push.example/abc", vapid });
+  const endpoint = "https://fcm.googleapis.com/wp/fixture";
+  const header = vapidHeader({ endpoint, vapid });
   const [, token] = /^vapid t=([^,]+), k=/.exec(header);
   const [h, p, s] = token.split(".");
-  assert.equal(JSON.parse(Buffer.from(p, "base64url")).aud, "https://push.example");
+  assert.equal(JSON.parse(Buffer.from(p, "base64url")).aud, "https://fcm.googleapis.com");
   const pub = Buffer.from(vapid.publicKey, "base64url");
   const key = crypto.createPublicKey({ format: "jwk", key: { kty: "EC", crv: "P-256", x: pub.subarray(1, 33).toString("base64url"), y: pub.subarray(33, 65).toString("base64url") } });
   assert.equal(crypto.verify("sha256", Buffer.from(`${h}.${p}`), { key, dsaEncoding: "ieee-p1363" }, Buffer.from(s, "base64url")), true);
 
   let sent = null;
-  const res = await sendEmptyPush({ endpoint: "https://push.example/abc", vapid, fetchFn: async (url, init) => { sent = init; return new Response(null, { status: 201 }); } });
+  const res = await sendEmptyPush({ endpoint, vapid, fetchFn: async (url, init) => { sent = init; return new Response(null, { status: 201 }); } });
   assert.equal(res.sent, true);
   assert.equal(sent.body, undefined, "nothing but a wake-up passes through the push service");
   assert.equal((await sendEmptyPush({ endpoint: "http://evil.example/x", vapid, fetchFn: async () => assert.fail() })).sent, false);

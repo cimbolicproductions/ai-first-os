@@ -180,7 +180,7 @@ async function runInit({
   const root = path.resolve(workspaceRoot);
   fs.mkdirSync(root, { recursive: true });
 
-  const agents = detected || detectInstalledAgents({ execProbe, homeDir });
+  const agents = detected || detectInstalledAgents({ execProbe, homeDir, workspaceRoot: root });
 
   let profile = answers;
   if (!profile) {
@@ -233,7 +233,7 @@ function runDoctor({ workspaceRoot = process.cwd(), execProbe, homeDir, env = pr
   if (!manifest) {
     return { ok: false, error: NEEDS_SETUP };
   }
-  const agents = detectInstalledAgents({ execProbe, homeDir });
+  const agents = detectInstalledAgents({ execProbe, homeDir, env, workspaceRoot: root });
 
   const checks = [];
   checks.push({
@@ -520,7 +520,7 @@ if (require.main === module) {
         board,
         manifest,
         buildRowId: taskTitle,
-        availability: availabilityFromDetected(cachedDetect()),
+        availability: availabilityFromDetected(cachedDetect({ workspaceRoot: root })),
         notices: createNoticeBook({ dir: path.dirname(board.jsonPath) }),
       });
       printJson({ ok: true, ...res });
@@ -556,7 +556,7 @@ if (require.main === module) {
             board,
             manifest,
             saveManifest: makeSaver(root),
-            availability: availabilityFromDetected(cachedDetect()),
+            availability: availabilityFromDetected(cachedDetect({ workspaceRoot: root })),
           });
         }
       } finally {

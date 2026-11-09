@@ -224,22 +224,29 @@ function createLocalBoard({ boardDir, routerName = "Router", now = () => new Dat
     return withLock(() => claimTaskLocked(input));
   }
 
-  function claimTaskLocked({ taskId, agent, runId = crypto.randomBytes(4).toString("hex"), claimCode = crypto.randomBytes(6).toString("hex") }) {
+  function claimTaskLocked({ taskId, agent, assignTo = agent, meta, note, runId = crypto.randomBytes(4).toString("hex"), claimCode = crypto.randomBytes(6).toString("hex") }) {
     const state = readState();
     const row = state.rows.find(r => r.ID === taskId);
     if (!row) throw Object.assign(new Error("Task missing"), { code: "TASK_MISSING" });
     if (row.Status === "Done") throw Object.assign(new Error("Task already done"), { code: "TASK_DONE" });
     if (row.Status === "In progress") throw Object.assign(new Error(`${taskId} is already running.`), { code: "TASK_BUSY" });
+    if (row.Status !== "Open") throw Object.assign(new Error("Answer the pending question first."), { code: "TASK_NOT_OPEN" });
     if (row.To.toLowerCase() !== String(agent).toLowerCase()) {
       throw Object.assign(new Error(`Row ${taskId} is assigned to ${row.To}, not ${agent}`), { code: "NOT_OWNER" });
     }
     const marker = `[RUN ${taskId} ${runId} ${claimCode}]`;
     const stamp = todayStr();
+    state.meta = state.meta || {};
+    state.meta[taskId] = { ...state.meta[taskId], ...meta, activeClaim: marker };
     row.Status = "In progress";
+    row.To = assignTo;
     row.Updated = stamp;
-    row["Latest note"] = `${row["Latest note"] ? row["Latest note"] + "\n" : ""}${agent} ${stamp}: ${marker}`;
+    const notes = [row["Latest note"]];
+    if (note) notes.push(`${agent} ${stamp}: ${note}`);
+    notes.push(`${assignTo} ${stamp}: ${marker}`);
+    row["Latest note"] = notes.filter(Boolean).join("\n");
     saveState(state);
-    logActivity({ type: "started", row: taskId, to: agent, task: row.Task });
+    logActivity({ type: "started", row: taskId, to: assignTo, task: row.Task });
     return { task: structuredClone(row), claimMarker: marker };
   }
 
@@ -247,11 +254,11 @@ function createLocalBoard({ boardDir, routerName = "Router", now = () => new Dat
     return withLock(() => updateByColumnNameLocked(input));
   }
 
-  function updateByColumnNameLocked({ taskId, agent, claimMarker, columns = {}, note }) {
+  function updateByColumnNameLocked({ taskId, agent, claimMarker, columns = {}, note, meta }) {
     const state = readState();
     const row = state.rows.find(r => r.ID === taskId);
     if (!row) throw Object.assign(new Error("Task missing"), { code: "TASK_MISSING" });
-    if (claimMarker && !String(row["Latest note"] || "").includes(claimMarker)) {
+    if (claimMarker && (row.Status !== "In progress" || state.meta?.[taskId]?.activeClaim !== claimMarker)) {
       throw Object.assign(new Error("Missing or mismatched claim marker"), { code: "CLAIM_MISMATCH" });
     }
     for (const key of Object.keys(columns)) {
@@ -262,6 +269,11 @@ function createLocalBoard({ boardDir, routerName = "Router", now = () => new Dat
         throw Object.assign(new Error(`Invalid status "${columns[key]}"`), { code: "INVALID_STATUS" });
       }
       row[key] = String(columns[key]);
+    }
+    if (meta || columns.Status) {
+      state.meta = state.meta || {};
+      state.meta[taskId] = { ...state.meta[taskId], ...meta };
+      if (columns.Status && columns.Status !== "In progress") delete state.meta[taskId].activeClaim;
     }
     const stamp = todayStr();
     if (note) {

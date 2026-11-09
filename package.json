@@ -26,7 +26,7 @@
     "watch": "node bin/aios.cjs watch",
     "sync": "node bin/aios.cjs sync",
     "doctor": "node bin/aios.cjs doctor",
-    "test": "node --test test/template.test.cjs",
+    "test": "node --test --test-concurrency=1",
     "build:installer": "node scripts/build-installer.cjs"
   }
 }
