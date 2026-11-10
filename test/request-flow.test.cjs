@@ -9,7 +9,7 @@ const { EventEmitter } = require("node:events");
 const { createLocalBoard } = require("../adapters/local-board.cjs");
 const { createNoticeBook } = require("../lib/notices.cjs");
 const { auditOffers } = require("../lib/audit-loop.cjs");
-const { answerNotice, defaultCliRunner, dispatchBoardTask, queueOrganizerRequest } = require("../lib/os-runtime.cjs");
+const { answerNotice, defaultCliRunner, dispatchBoardTask, queueOrganizerRequest, replyToOrganizer } = require("../lib/os-runtime.cjs");
 const { summarizeOpenTasks } = require("../lib/request-flow.cjs");
 
 function setup(t) {
@@ -98,21 +98,39 @@ test("planning uses one read-only organizer fallback and cannot enqueue a build"
   const meta = board.getMeta(row.ID);
   assert.equal(meta.requestedAgent, "muse");
   assert.equal(meta.executor, "claude");
-  assert.deepEqual(meta.progress.map(p => p.stage), ["queued", "fallback", "running", "completed"]);
+  assert.deepEqual(meta.progress.map(p => p.stage), ["queued", "fallback", "planning", "completed"]);
   assert.deepEqual(auditOffers(board), []);
 });
 
-test("coding goes to a builder and can be reviewed after completion", async t => {
-  const { board, notices, queue, run } = setup(t);
+test("Muse clarifies, keeps the answer on one row, and hands clear coding to the builder", async t => {
+  const { board, notices, manifest, queue, run } = setup(t);
   const row = queue("Fix the login bug");
-  assert.equal(row.To, "claude");
-  await run(row, async ({ agent, mode }) => {
+  assert.equal(row.To, "muse");
+  await run(row, async ({ agent, mode, prompt }) => {
     assert.equal(agent, "claude");
-    assert.equal(mode, "write");
+    assert.equal(mode, "read");
+    assert.match(prompt, /You are Muse/);
+    return { status: "Waiting on User", result: "clarify", question: "Which login bug?" };
+  });
+  assert.equal(board.findTask(row.ID).Status, "Waiting on User");
+  assert.equal(board.getMeta(row.ID).awaitingReply, true);
+  assert.equal(notices.listOpen().length, 0, "clarification is a free-text reply, not approval");
+  const reply = { taskId: row.ID, text: "The sign-in button spins forever", turn: 1, board, manifest };
+  replyToOrganizer(reply);
+  assert.throws(() => replyToOrganizer(reply), { code: "STALE_REPLY" });
+  const roles = [];
+  await run(row, async ({ agent, mode, prompt }) => {
+    roles.push([agent, mode]);
+    assert.match(prompt, /sign-in button spins forever/);
+    if (mode === "read") return { status: "Waiting on User", result: "delegate", answer: "I’ll send the fix to a builder.",
+      delegation: { role: "builder", work: "Fix the sign-in button and test it" } };
+    assert.match(prompt, /Fix the sign-in button and test it/);
     return { status: "Done", answer: "Fixed and verified with the login test." };
   });
+  assert.deepEqual(roles, [["claude", "read"], ["claude", "write"]]);
+  assert.equal(board.listTasks().length, 1);
+  assert.equal(board.getMeta(row.ID).progress.some(event => event.stage === "delegated"), true);
   assert.equal(auditOffers(board)[0].row, row.ID);
-  assert.ok(notices.listOpen().some(n => n.choices.some(c => c.value === "audit")));
 });
 
 test("a mixed status request and email cannot bypass the action gate", async t => {
@@ -131,7 +149,7 @@ test("a mixed status request and email cannot bypass the action gate", async t =
 
 test("simultaneous run attempts only launch one worker", async t => {
   const { board, queue, run } = setup(t);
-  const row = queue("Fix a login error");
+  const row = queue("Help me plan a login fix");
   let unblock;
   let started;
   const began = new Promise(resolve => { started = resolve; });
@@ -191,4 +209,32 @@ test("read-only work selects the harness's explicit plan or ask mode", () => {
   assert.deepEqual(findHarness("gemini").run.args({ mode: "read" }).slice(-2), ["--approval-mode", "plan"]);
   assert.ok(findHarness("cursor").run.args({ mode: "read" }).includes("--mode=ask"));
   assert.ok(!findHarness("cursor").run.args({ mode: "read" }).includes("--force"));
+});
+
+test("Claude's session limit causes a bounded switch to another headless agent", async t => {
+  const { board, queue, run } = setup(t);
+  const row = queue("Help me plan next week");
+  const calls = [];
+  await run(row, options => {
+    calls.push(options.agent);
+    const output = options.agent === "claude"
+      ? "You've hit your session limit · resets 5:40pm (America/Chicago)"
+      : 'AIOS-RESULT: {"status":"completed","answer":"Here is a plan."}';
+    return defaultCliRunner({ ...options, detect: () => [{ id: options.agent, workerPath: options.agent + ".exe" }],
+      spawnFn: fakeSpawn(output) });
+  });
+  assert.deepEqual(calls, ["claude", "codex"]);
+  assert.equal(board.findTask(row.ID).Status, "Done");
+  assert.equal(board.getMeta(row.ID).executor, "codex");
+  assert.equal(board.getMeta(row.ID).progress.some(event => event.stage === "unavailable" && event.agent === "claude"), true);
+});
+
+
+test("an organizer cannot mark a requested code change done without a worker", async t => {
+  const { board, queue, run } = setup(t);
+  const row = queue("Fix the login bug");
+  await run(row, async () => ({ status: "Done", answer: "I fixed it." }));
+  assert.equal(board.findTask(row.ID).Status, "Waiting on User");
+  assert.match(board.getMeta(row.ID).answer, /without handing off/);
+  assert.deepEqual(auditOffers(board), []);
 });

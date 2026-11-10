@@ -18,7 +18,7 @@ node bin/aios.cjs desktop
 
 **Start with a request.** Type a question or press `Space` to focus the request box. Send it and follow the reply and progress on the board. Select a queued task and press `R` or click Run to start it now. Use Advanced mode to choose an agent yourself or inspect the technical details.
 
-**Your organizer coordinates.** A question about open tasks reads the connected board. Questions and planning use an organizer flow. Research and code changes go to the appropriate worker. The board names the worker that actually ran. Muse is an organizer identity and can use an available local agent for requests that need a model.
+**Muse coordinates.** A question about open tasks reads the configured board. For other requests, Muse uses a signed-in terminal agent to answer, ask for details, or delegate to a builder, researcher, or reviewer. Reply on the same request. The board shows which service is working and when another takes over. Use **AI services** to check which agents are installed and signed in.
 
 **Audit.** When a build lands, you get one button. The other agent reviews the work, and anything it finds goes back to the builder as fix tasks. Nobody relays anything.
 

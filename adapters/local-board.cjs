@@ -254,10 +254,16 @@ function createLocalBoard({ boardDir, routerName = "Router", now = () => new Dat
     return withLock(() => updateByColumnNameLocked(input));
   }
 
-  function updateByColumnNameLocked({ taskId, agent, claimMarker, columns = {}, note, meta }) {
+  function updateByColumnNameLocked({ taskId, agent, claimMarker, expectedReplyTurn, columns = {}, note, meta }) {
     const state = readState();
     const row = state.rows.find(r => r.ID === taskId);
     if (!row) throw Object.assign(new Error("Task missing"), { code: "TASK_MISSING" });
+    if (expectedReplyTurn !== undefined) {
+      const current = state.meta?.[taskId];
+      if (row.Status !== "Waiting on User" || !current?.awaitingReply || current.conversation?.length !== expectedReplyTurn) {
+        throw Object.assign(new Error("This question has changed. Check the latest reply."), { code: "STALE_REPLY" });
+      }
+    }
     if (claimMarker && (row.Status !== "In progress" || state.meta?.[taskId]?.activeClaim !== claimMarker)) {
       throw Object.assign(new Error("Missing or mismatched claim marker"), { code: "CLAIM_MISMATCH" });
     }
