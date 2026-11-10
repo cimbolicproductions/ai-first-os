@@ -208,6 +208,7 @@ function createServiceAccountTokenProvider({
   tokenUri,
   fetchImpl = globalThis.fetch,
   now = () => Date.now(),
+  timeoutMs = 10000,
 }) {
   if (typeof fetchImpl !== "function") fail("CONFIG_REQUIRED", "Global fetch or fetchImpl is required.");
   let cachedSa = serviceAccount ? structuredClone(serviceAccount) : null;
@@ -251,6 +252,8 @@ function createServiceAccountTokenProvider({
     });
     const res = await fetchImpl(endpoint, {
       method: "POST",
+      redirect: "error",
+      signal: AbortSignal.timeout(timeoutMs),
       headers: { "content-type": "application/x-www-form-urlencoded" },
       body: body.toString(),
     });
@@ -272,6 +275,42 @@ function createServiceAccountTokenProvider({
       inflight = refresh().finally(() => { inflight = null; });
     }
     return inflight;
+  };
+}
+
+function createGoogleApiFetch({ getToken, fetchImpl, timeoutMs }) {
+  return async function apiFetch(url, { method = "GET", body } = {}) {
+    const token = await getToken();
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const res = await fetchImpl(url, {
+        method,
+        redirect: "error",
+        headers: {
+          authorization: `Bearer ${token}`,
+          ...(body !== undefined ? { "content-type": "application/json" } : {}),
+        },
+        body: body !== undefined ? JSON.stringify(body) : undefined,
+        signal: controller.signal,
+      });
+      const text = await res.text();
+      if (!res.ok) {
+        fail("SHEETS_HTTP_ERROR", safeMessage(`Google API ${res.status}: ${text}`));
+      }
+      if (!text.trim()) return {};
+      try {
+        return JSON.parse(text);
+      } catch {
+        return { content: text };
+      }
+    } catch (err) {
+      if (err instanceof BoardAdapterError) throw err;
+      if (err?.name === "AbortError") fail("HTTP_TIMEOUT", `Google API request timed out after ${timeoutMs}ms.`);
+      fail("HTTP_ERROR", safeMessage(err?.message || "Network error contacting Google API."));
+    } finally {
+      clearTimeout(timer);
+    }
   };
 }
 
@@ -298,38 +337,7 @@ function createSheetsBoardAdapter(options = {}) {
 
   let sheetIdMap = options.sheetIdMap ? { ...options.sheetIdMap } : null;
 
-  async function apiFetch(url, { method = "GET", body } = {}) {
-    const token = await getToken();
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
-    try {
-      const res = await fetchImpl(url, {
-        method,
-        headers: {
-          authorization: `Bearer ${token}`,
-          ...(body !== undefined ? { "content-type": "application/json" } : {}),
-        },
-        body: body !== undefined ? JSON.stringify(body) : undefined,
-        signal: controller.signal,
-      });
-      const text = await res.text();
-      if (!res.ok) {
-        fail("SHEETS_HTTP_ERROR", safeMessage(`Google API ${res.status}: ${text}`));
-      }
-      if (!text.trim()) return {};
-      try {
-        return JSON.parse(text);
-      } catch {
-        return { content: text };
-      }
-    } catch (err) {
-      if (err instanceof BoardAdapterError) throw err;
-      if (err?.name === "AbortError") fail("HTTP_TIMEOUT", `Google API request timed out after ${timeoutMs}ms.`);
-      fail("HTTP_ERROR", safeMessage(err?.message || "Network error contacting Google API."));
-    } finally {
-      clearTimeout(timer);
-    }
-  }
+  const apiFetch = createGoogleApiFetch({ getToken, fetchImpl, timeoutMs });
 
   async function resolveLiveSheetIdMap() {
     if (sheetIdMap) return sheetIdMap;
@@ -429,6 +437,51 @@ function createSheetsBoardAdapter(options = {}) {
   return { call, readOnly, boardId };
 }
 
+/** Private app transport for deliberate owner actions. The agent adapter stays unchanged. */
+function createOwnerSheetTransport(options = {}) {
+  const boardId = validateBoardId(options.boardId);
+  const fetchImpl = options.fetchImpl || globalThis.fetch;
+  const timeoutMs = options.timeoutMs || 10000;
+  const getToken = options.tokenProvider || createServiceAccountTokenProvider({
+    serviceAccountPath: options.serviceAccountPath,
+    tokenUri: "https://oauth2.googleapis.com/token",
+    scope: SCOPES.readWrite,
+    fetchImpl,
+    timeoutMs,
+  });
+  const reader = createSheetsBoardAdapter({ ...options, boardId, readOnly: true, tokenProvider: getToken });
+  const sheetsBaseUrl = (options.sheetsBaseUrl || "https://sheets.googleapis.com/v4").replace(/\/+$/, "");
+  const apiFetch = createGoogleApiFetch({ getToken, fetchImpl, timeoutMs });
+  const batch = requests => apiFetch(sheetsBaseUrl + "/spreadsheets/" + boardId + ":batchUpdate", {
+    method: "POST", body: { requests },
+  });
+  const literal = stringValue => ({ userEnteredValue: { stringValue } });
+
+  return {
+    getMetadata: () => reader.call({ operation: "get_metadata", arguments: {} }),
+    async readRange(sheetName, range) {
+      const tab = normalizeTab(sheetName, new Set(["Tasks", "Done"]));
+      validateRectangle(range);
+      const a1 = formatA1Range(tab, range);
+      const data = await apiFetch(sheetsBaseUrl + "/spreadsheets/" + boardId + "/values/" +
+        encodeURIComponent(a1) + "?valueRenderOption=FORMATTED_VALUE");
+      if (typeof data.range !== "string" || data.majorDimension !== "ROWS" ||
+          (data.values !== undefined && !Array.isArray(data.values))) {
+        fail("SHEETS_INVALID_RESPONSE", "Google Sheets did not return a task range.");
+      }
+      return data.values || [];
+    },
+    appendRows: (sheetId, rows) => batch([{ appendCells: {
+      sheetId, rows: rows.map(row => ({ values: row.map(literal) })), fields: "userEnteredValue",
+    } }]),
+    updateCells: (sheetId, rowIndex, cells) => batch(cells.map(({ column, value }) => ({ updateCells: {
+      range: { sheetId, startRowIndex: rowIndex, endRowIndex: rowIndex + 1, startColumnIndex: column, endColumnIndex: column + 1 },
+      rows: [{ values: [literal(value)] }],
+      fields: "userEnteredValue",
+    } }))),
+  };
+}
+
 module.exports = {
   DEFAULT_TABS,
   SCOPES,
@@ -437,4 +490,5 @@ module.exports = {
   prepareRequest,
   createServiceAccountTokenProvider,
   createSheetsBoardAdapter,
+  createOwnerSheetTransport,
 };

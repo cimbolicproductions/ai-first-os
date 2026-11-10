@@ -20,6 +20,10 @@ node bin/aios.cjs desktop
 
 **Muse coordinates.** A question about open tasks reads the configured board. For other requests, Muse uses a signed-in terminal agent to answer, ask for details, or delegate to a builder, researcher, or reviewer. Reply on the same request. The board shows which service is working and when another takes over. Use **AI services** to check which agents are installed and signed in.
 
+**Your task list.** With a connected Google Sheet, ask “What tasks are at hand?” to read its open tasks. To capture several tasks, choose **Add tasks** or **Voice dump**, review one task per line, then choose **Save tasks**. Use **Sheet tasks** to update a title or status. The app confirms the saved task IDs before clearing the draft.
+
+**Connect a Sheet.** The workspace manifest can use the existing service account configuration or a signed-in Codex CLI with the Google Drive app connected. For Codex, set `board.mode` to `sheets` and set `board.sheets` to an object with `provider: "codex"`, your `boardId`, and an optional `ownerName` and `assignee`. The Sheet uses the Agent Tasks columns in its Tasks and Done tabs. Keep credentials and your Sheet ID in your local workspace.
+
 **Audit.** When a build lands, you get one button. The other agent reviews the work, and anything it finds goes back to the builder as fix tasks. Nobody relays anything.
 
 **Asked once.** If something needs a choice you have not made, it asks in plain words at that moment and remembers.

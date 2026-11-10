@@ -24,6 +24,16 @@
   button.soft { background:var(--card); color:var(--text); border:1px solid var(--line); }
   button:disabled { opacity:.4; }
   #send { width:100%; margin-top:10px; }
+  #taskActions { display:flex; flex-wrap:wrap; gap:8px; margin-top:10px; }
+  #taskActions button { flex:1 1 auto; padding:10px 12px; font-size:15px; }
+  #voiceHelp, #sheetHint { color:var(--muted); font-size:14px; margin-top:8px; }
+  #sheetRows { list-style:none; }
+  #sheetRows li { display:flex; align-items:flex-start; gap:10px; justify-content:space-between; }
+  #sheetRows button { flex:none; padding:7px 11px; font-size:14px; }
+  .task-meta { color:var(--muted); font-size:14px; margin-top:4px; }
+  #editTask label { display:block; margin:10px 0 5px; }
+  #editTask textarea { min-height:88px; }
+  #editTask select { font:inherit; color:var(--text); background:var(--bg); border:1px solid var(--line); border-radius:8px; padding:8px; }
   #agents { display:flex; gap:8px; overflow-x:auto; margin-top:12px; scrollbar-width:none; }
   #agents::-webkit-scrollbar { display:none; }
   #agents button { flex:none; padding:7px 13px; font-size:14px; font-weight:500; background:var(--card); color:var(--text); border:1px solid var(--line); }
@@ -53,10 +63,35 @@
 <main id="app" hidden>
   <div id="home"><img id="brand" src="logo.png" alt="AI-first OS"><span id="dot"></span><span id="homeText">Checking your computer…</span></div>
   <label class="hide-label" for="ask">What do you need?</label>
-  <textarea id="ask" placeholder="What do you need?"></textarea>
+  <textarea id="ask" placeholder="What do you need?" maxlength="4000"></textarea>
+  <div id="taskActions">
+    <button type="button" id="voice" class="soft" aria-pressed="false">Voice dump</button>
+    <button type="button" id="saveTasks" class="soft">Save tasks</button>
+    <button type="button" id="viewTasks" class="soft">View tasks</button>
+  </div>
+  <p id="voiceHelp">Say your tasks. Say “next task” between them, or put each on its own line. Review them, then tap Save tasks.</p>
   <div id="agents"></div>
-  <button id="send">Send</button>
+  <button id="send">Ask Muse</button>
   <p id="msg" role="status"></p>
+  <section id="sheetWrap" hidden>
+    <h2>Your task sheet</h2>
+    <p id="sheetHint"></p>
+    <button type="button" id="addMore" class="soft" hidden>Add tasks</button>
+    <ul id="sheetRows"></ul>
+    <form id="editTask" class="notice" hidden>
+      <strong id="editHeading">Update task</strong>
+      <label for="editTitle">Task</label>
+      <textarea id="editTitle" maxlength="500" required></textarea>
+      <label for="editStatus">Status</label>
+      <select id="editStatus">
+        <option>Open</option><option>In progress</option><option>Waiting on Dom</option><option>Done</option>
+      </select>
+      <div class="choices">
+        <button type="submit" id="updateTask">Save changes</button>
+        <button type="button" id="cancelEdit" class="soft">Cancel</button>
+      </div>
+    </form>
+  </section>
   <section id="waitingWrap" hidden><h2>Waiting on you</h2><div id="waiting"></div></section>
   <section id="updatesWrap" hidden><h2>Updates</h2><div id="updates"></div></section>
   <h2>Today</h2>
@@ -86,6 +121,20 @@
   let lastAgents = "";
   let lastAsks = "";
   const answered = new Set();
+  const pendingKey = "aios-sheet-request:" + backend;
+  let sheetAvailable = false;
+  let sheetBusy = false;
+  let sheetPolling = false;
+  let retrySheet = null;
+  let pendingSheet = null;
+  let sheetRows = [];
+  let editing = null;
+  let recognition = null;
+  try {
+    const savedRequest = JSON.parse(read(pendingKey) || "null");
+    if (/^[0-9a-f]{32}$/.test(savedRequest?.requestId || "") &&
+        ["list", "add", "update"].includes(savedRequest.action)) pendingSheet = savedRequest;
+  } catch {}
 
   async function call(method, route, body) {
     const res = await fetch(backend.replace(/\/$/, "") + "/v1/" + route, {
@@ -94,11 +143,203 @@
       ...(body ? { body: JSON.stringify(body) } : {}),
     });
     const data = await res.json().catch(() => ({}));
-    if (!res.ok || data.ok === false) throw new Error(data.message || "Could not reach your OS.");
+    if (!res.ok || data.ok === false) {
+      throw Object.assign(new Error(data.message || "Could not reach your OS."), { code: data.code });
+    }
     return data;
   }
 
   function say(text) { $("msg").textContent = text; }
+
+  function newSheetRequestId() {
+    return Array.from(crypto.getRandomValues(new Uint8Array(16)), value => value.toString(16).padStart(2, "0")).join("");
+  }
+
+  function sheetButtons() {
+    const busy = sheetBusy || Boolean(pendingSheet);
+    $("saveTasks").disabled = busy || Boolean(recognition);
+    $("viewTasks").disabled = $("updateTask").disabled = busy;
+  }
+
+  function showSheetRows(message) {
+    $("sheetWrap").hidden = false;
+    $("sheetHint").textContent = message;
+    $("addMore").hidden = sheetRows.length > 0;
+    $("sheetRows").replaceChildren(...sheetRows.map(task => {
+      const item = document.createElement("li");
+      item.className = "notice";
+      const info = document.createElement("div");
+      const title = document.createElement("strong");
+      title.textContent = task.id + " · " + task.task;
+      const meta = document.createElement("p");
+      meta.className = "task-meta";
+      meta.textContent = [task.status, task.to].filter(Boolean).join(" · ");
+      const edit = document.createElement("button");
+      edit.type = "button";
+      edit.className = "soft";
+      edit.textContent = "Edit";
+      edit.setAttribute("aria-label", "Edit " + task.id);
+      edit.onclick = () => {
+        if (pendingSheet || sheetBusy) return;
+        editing = task;
+        $("editHeading").textContent = "Update " + task.id;
+        $("editTitle").value = task.task;
+        $("editStatus").value = task.status;
+        $("editTask").hidden = false;
+        $("editTitle").focus();
+      };
+      info.append(title, meta);
+      item.append(info, edit);
+      return item;
+    }));
+  }
+
+  async function pollSheet(online) {
+    const pending = pendingSheet;
+    if (!pending || sheetPolling) return;
+    sheetPolling = true;
+    try {
+      const result = await call("POST", "sheetstatus", { requestId: pending.requestId });
+      if (result.state === "queued") {
+        say(online ? "Waiting for your task sheet…" : "Queued. Your computer will save it when it comes online.");
+        return;
+      }
+      const receipt = result.receipt;
+      if (result.state !== "finished" || receipt?.requestId !== pending.requestId ||
+          receipt.action !== pending.action || typeof receipt.success !== "boolean") {
+        throw new Error("Waiting for confirmation from your task sheet.");
+      }
+      pendingSheet = null;
+      retrySheet = null;
+      write(pendingKey, "");
+      say(receipt.message);
+      if (!receipt.success) return;
+      if (receipt.action === "list") {
+        sheetRows = receipt.tasks || [];
+        editing = null;
+        $("editTask").hidden = true;
+        showSheetRows(receipt.message);
+        if (pending.draft && $("ask").value === pending.draft) $("ask").value = "";
+        $("sheetWrap").scrollIntoView({ block: "nearest" });
+      } else if (receipt.action === "add") {
+        if (pending.draft && $("ask").value === pending.draft) $("ask").value = "";
+        $("ask").focus();
+      } else {
+        const changed = receipt.tasks?.[0];
+        if (changed) {
+          sheetRows = sheetRows.flatMap(row => row.id !== changed.id ? [row] : changed.status === "Done" ? [] : [changed]);
+          showSheetRows(sheetRows.length ? "Open tasks" : "None currently. Did you want to add tasks?");
+        }
+        editing = null;
+        $("editTask").hidden = true;
+      }
+    } catch (err) {
+      if (err.code === "SHEET_REQUEST_MISSING") {
+        pendingSheet = null;
+        write(pendingKey, "");
+      }
+      say(err.message);
+    } finally {
+      sheetPolling = false;
+      sheetButtons();
+    }
+  }
+
+  async function submitSheet(action, payload = {}, draft = "") {
+    if (sheetBusy || pendingSheet) return;
+    if (!sheetAvailable) {
+      say("Connect your task sheet on the computer to use this here.");
+      return;
+    }
+    const signature = JSON.stringify({ action, ...payload });
+    if (retrySheet?.signature !== signature) {
+      retrySheet = { signature, operation: { requestId: newSheetRequestId(), action, ...payload } };
+    }
+    const operation = retrySheet.operation;
+    sheetBusy = true;
+    sheetButtons();
+    say("Sending to your computer…");
+    try {
+      const queued = await call("POST", "sheet", operation);
+      if (queued.requestId !== operation.requestId) throw new Error("Could not confirm that the task was queued.");
+      pendingSheet = { requestId: operation.requestId, action, draft };
+      write(pendingKey, JSON.stringify({ requestId: operation.requestId, action }));
+      say("Queued for your computer.");
+      await refresh();
+    } catch (err) {
+      say(err.message);
+    } finally {
+      sheetBusy = false;
+      sheetButtons();
+    }
+  }
+
+  function isSheetQuestion(text) {
+    return /^(?:what tasks (?:are at hand|are open|are pending|are on my (?:task )?sheet)|what(?:['’]s| is) (?:at hand|open)|(?:show|list) (?:me )?(?:my |the )?(?:open )?tasks)(?: right now)?[?.!]*$/i.test(text);
+  }
+
+  $("saveTasks").onclick = () => {
+    const draft = $("ask").value;
+    const tasks = draft.split(/\r?\n/).map(task => task.trim()).filter(Boolean);
+    if (!tasks.length) { say("Say or type a task first."); $("ask").focus(); return; }
+    if (draft.length > 4000 || tasks.length > 20 || tasks.some(task => task.length > 500)) {
+      say("Save up to 20 short tasks at a time."); return;
+    }
+    submitSheet("add", { tasks }, draft);
+  };
+  $("viewTasks").onclick = () => submitSheet("list");
+  $("addMore").onclick = () => $("ask").focus();
+  $("cancelEdit").onclick = () => { editing = null; $("editTask").hidden = true; };
+  $("editTask").onsubmit = event => {
+    event.preventDefault();
+    if (!editing) return;
+    const task = $("editTitle").value.trim();
+    const status = $("editStatus").value;
+    if (!task || !status) { say("Enter the task and its status."); return; }
+    const patch = { ...(task !== editing.task ? { task } : {}), ...(status !== editing.status ? { status } : {}) };
+    if (!Object.keys(patch).length) { say("Change the task or status first."); return; }
+    submitSheet("update", { id: editing.id, revision: editing.revision, ...patch });
+  };
+
+  $("voice").onclick = () => {
+    if (recognition) { recognition.stop(); return; }
+    const Speech = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!Speech) {
+      $("ask").focus();
+      say("Tap the microphone on your keyboard to dictate. Then tap Save tasks.");
+      return;
+    }
+    const draft = $("ask").value.trimEnd();
+    const speech = new Speech();
+    speech.lang = navigator.language;
+    speech.continuous = true;
+    speech.interimResults = true;
+    let voiceError = false;
+    speech.onstart = () => {
+      $("voice").textContent = "Stop recording";
+      $("voice").setAttribute("aria-pressed", "true");
+      sheetButtons();
+      say("Listening. Say “next task” between tasks.");
+    };
+    speech.onresult = event => {
+      const said = Array.from(event.results, result => result[0].transcript).join(" ").trim();
+      const separated = said.replace(/[,.;]?\s*\bnext task\b[,:;.]?\s*/gi, "\n").trim();
+      $("ask").value = [draft, separated].filter(Boolean).join("\n");
+    };
+    speech.onerror = () => {
+      voiceError = true;
+      say("Use the microphone on your keyboard to dictate, or type your tasks.");
+    };
+    speech.onend = () => {
+      recognition = null;
+      $("voice").textContent = "Voice dump";
+      $("voice").setAttribute("aria-pressed", "false");
+      sheetButtons();
+      if (!voiceError) say("Review what you said, then tap Save tasks.");
+    };
+    try { speech.start(); recognition = speech; sheetButtons(); }
+    catch { $("ask").focus(); say("Use the microphone on your keyboard to dictate."); }
+  };
 
   function noticeCard(n) {
     const card = document.createElement("div");
@@ -150,6 +391,8 @@
   async function refresh() {
     try {
       const s = await call("GET", "status");
+      sheetAvailable = s.sheetTasks === true;
+      sheetButtons();
       $("dot").className = s.home.online ? "on" : "";
       $("homeText").textContent = s.home.online
         ? "Home computer online"
@@ -167,6 +410,7 @@
       $("today").textContent = s.summary ? s.summary.headline : "Nothing yet.";
       vapidKey = s.vapidKey;
       $("alerts").hidden = !vapidKey || !("PushManager" in window) || (window.Notification && Notification.permission === "granted");
+      await pollSheet(s.home.online);
     } catch (err) {
       $("homeText").textContent = err.message;
     }
@@ -175,6 +419,10 @@
   $("send").onclick = async () => {
     const text = $("ask").value.trim();
     if (!text || sending) return;
+    if (isSheetQuestion(text)) {
+      await submitSheet("list", {}, $("ask").value);
+      return;
+    }
     sending = true;
     $("send").disabled = true;
     try {
@@ -205,6 +453,7 @@
     }
   };
 
+  sheetButtons();
   refresh().finally(() => { $("boot").hidden = true; $("app").hidden = false; });
   setInterval(refresh, 8000);
   document.addEventListener("visibilitychange", () => { if (!document.hidden) refresh(); });

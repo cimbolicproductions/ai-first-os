@@ -34,7 +34,7 @@ function setup(t) {
 test("an open-task question answers locally without an agent or audit", async t => {
   const { board, queue, run } = setup(t);
   board.addTask({ task: "Finish the login button", to: "claude" });
-  const row = queue("What tasks are open right now?");
+  const row = queue("What tasks are at hand?");
   const result = await run(row);
   const meta = board.getMeta(row.ID);
   assert.equal(result.status, "Done");
@@ -64,14 +64,11 @@ test("the configured Google Sheet is read by headers without write access", asyn
   manifest.board = { mode: "sheets", sheets: { boardId: "fake-board", serviceAccountPath: "fake-key-file" } };
   const result = await summarizeOpenTasks({
     board, manifest, requestId: "P1", task: "What tasks are open?",
-    makeSheets(options) {
-      assert.equal(options.readOnly, true);
-      assert.equal(options.boardId, "fake-board");
-      return { async call(operation, args) {
-        assert.equal(operation, "get_range");
-        assert.equal(args.sheet_name, "Tasks");
-        return { values: [["Task", "To", "Status", "ID"], ["Shared task", "Muse", "Open", "P4"], ["Old", "Codex", "Done", "P3"]] };
-      } };
+    makeSheetTasks({ manifest: supplied }) {
+      assert.equal(supplied.board.sheets.boardId, "fake-board");
+      return { configured: true, listOpen: async () => [
+        { id: "P4", task: "Shared task", to: "Muse", status: "Open" },
+      ] };
     },
   });
   assert.match(result.answer, /^Connected Google Sheet\n.*Shared task/);
@@ -237,4 +234,26 @@ test("an organizer cannot mark a requested code change done without a worker", a
   assert.equal(board.findTask(row.ID).Status, "Waiting on User");
   assert.match(board.getMeta(row.ID).answer, /without handing off/);
   assert.deepEqual(auditOffers(board), []);
+});
+
+
+test("Muse offers to add a task when the connected Sheet has none", async t => {
+  const { board, manifest } = setup(t);
+  manifest.board = { mode: "sheets" };
+  const result = await summarizeOpenTasks({
+    board, manifest, requestId: "P1", task: "What tasks are at hand?",
+    makeSheetTasks: () => ({ configured: true, listOpen: async () => [] }),
+  });
+  assert.equal(result.answer, "Connected Google Sheet\nNone currently. Want to add a task?");
+});
+
+test("explicit capture without a connected Sheet holds safely without launching an agent", async t => {
+  const { board, queue, run } = setup(t);
+  const row = queue("Add a task to send the receipt");
+  await run(row);
+  const meta = board.getMeta(row.ID);
+  assert.equal(meta.intent, "sheet_task");
+  assert.equal(board.findTask(row.ID).Status, "Waiting on User");
+  assert.match(meta.answer, /Connect your Google Sheet/);
+  assert.match(meta.sheetRequestId, /^[0-9a-f-]{36}$/);
 });
