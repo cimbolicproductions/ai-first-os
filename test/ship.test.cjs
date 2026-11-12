@@ -12,7 +12,7 @@ const { parseRequestResult } = require("../lib/request-flow.cjs");
 const { slug, shipVersion } = require("../lib/ship.cjs");
 
 /** Stand-ins for git, GitHub and Vercel that record every call. Nothing real is touched. */
-function fakeTools({ github = true, vercel = true } = {}) {
+function fakeTools({ github = true, vercel = true, alias = false } = {}) {
   const calls = [];
   let hasRemote = false;
   async function run(tool, args, options = {}) {
@@ -23,7 +23,10 @@ function fakeTools({ github = true, vercel = true } = {}) {
     if (line === "vercel whoami") return { code: vercel ? 0 : 1, stdout: "", stderr: "" };
     if (line.startsWith("gh repo create")) { hasRemote = true; return { code: 0, stdout: "", stderr: "" }; }
     if (line.startsWith("gh repo view")) return { code: 0, stdout: "https://github.com/owner/bakery-site\n", stderr: "" };
-    if (line === "vercel deploy --yes") return { code: 0, stdout: "Inspect: https://vercel.com/x\nhttps://bakery-site-abc123.vercel.app\n", stderr: "" };
+    if (line === "vercel deploy --yes") return {
+      code: 0, stdout: "https://bakery-site-abc123.vercel.app\n",
+      stderr: "Inspect: https://vercel.com/x [2s]\nProduction: https://bakery-site-abc123.vercel.app [9s]\n" + (alias ? "Aliased: https://bakery-site.vercel.app [9s]\n" : ""),
+    };
     return { code: 0, stdout: "", stderr: "" };
   }
   return { run, calls, lines: () => calls.map(call => `${call.tool} ${call.args.join(" ")}`) };
@@ -132,6 +135,17 @@ test("when GitHub is not connected, the question opens the sign-in and then carr
   assert.deepEqual(opened, ["github"]);
   const carryOn = notices.listOpen().find(n => /Once you are signed in to GitHub/.test(n.text));
   assert.deepEqual(carryOn.choices.map(choice => choice.label), ["I'm signed in"]);
+});
+
+test("the owner gets the short Vercel address when there is one, not the long one that can need a sign-in", async t => {
+  const { dir, board, manifest, notices } = setup(t, { ship: { github: "no" } });
+  const folder = path.join(dir, "projects", "bakery-site");
+  fs.mkdirSync(path.join(folder, ".git"), { recursive: true });
+  manifest.projects = [{ name: "bakery-site", path: folder, repo: null, createdByOs: true, online: "yes" }];
+  board.addTask({ task: "Build the bakery site", to: "codex", meta: { kind: "build", project: "bakery-site" } });
+  assert.equal((await shipVersion({ board, root: "P1", manifest, notices, run: fakeTools({ alias: true }).run })).liveUrl, "https://bakery-site.vercel.app");
+  board.setMeta("P1", { onlineVersion: null });
+  assert.equal((await shipVersion({ board, root: "P1", manifest, notices, run: fakeTools().run })).liveUrl, "https://bakery-site-abc123.vercel.app");
 });
 
 test("project names become safe folder names, or are refused", () => {
