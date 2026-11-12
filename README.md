@@ -32,6 +32,10 @@ node bin/aios.cjs desktop
 
 **It works in versions.** Version 1 shows up as soon as it is built. While it is being checked, tell it what you want changed. Your notes and the review are combined into one brief, and the same agent builds version 2. Leave **Don’t stop till it’s done** on and it keeps going until the review comes back clean. Turn it off and it shows you each review and waits for your word.
 
+**New ideas get a home.** Ask for something new and it makes a project folder for it, then builds there.
+
+**It can take it to GitHub and the web.** When a version comes back clean it is saved. The first time, it asks whether to keep your projects on your GitHub as private repositories. For each project, it asks before putting it online with Vercel, because anyone with the link can open it. If GitHub or Vercel is not connected, the question has a button that opens the sign-in. It only ever does this for projects it created, never ones you already had.
+
 **It keeps going.** If an agent is signed out or at its limit, another one takes the task and the board says who. If nobody can take it right now, it waits a minute and tries again.
 
 **It uses what you already pay for.** Every run uses your subscription sign-ins. If a pay-per-use key is the only way forward, it asks first, once.
