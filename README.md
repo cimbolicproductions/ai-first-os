@@ -30,6 +30,8 @@ node bin/aios.cjs desktop
 
 **The work gets checked.** When one agent finishes building, another checks it. Anything it finds goes back to be fixed, then gets checked again. If you only have one agent, it checks its own work and says so. Turn **Outside review** off if you do not want it.
 
+**It works in versions.** Version 1 shows up as soon as it is built. While it is being checked, tell it what you want changed. Your notes and the review are combined into one brief, and the same agent builds version 2. Leave **Don’t stop till it’s done** on and it keeps going until the review comes back clean. Turn it off and it shows you each review and waits for your word.
+
 **It keeps going.** If an agent is signed out or at its limit, another one takes the task and the board says who. If nobody can take it right now, it waits a minute and tries again.
 
 **It uses what you already pay for.** Every run uses your subscription sign-ins. If a pay-per-use key is the only way forward, it asks first, once.
@@ -46,7 +48,7 @@ node bin/aios.cjs desktop
 
 ## If you want to look behind the box
 
-You never have to. **Detailed** (top right) shows every task, who has it, and the technical details, and lets you run, audit, or reassign by hand. `node bin/aios.cjs help` lists the terminal commands.
+You never have to. **Show board** under the box opens the board, and the **Tasks** tab lists everything open. `node bin/aios.cjs help` lists the terminal commands.
 
 ## For developers
 

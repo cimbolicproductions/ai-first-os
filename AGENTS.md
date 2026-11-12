@@ -11,6 +11,7 @@ This repository is **AI-first OS** (`https://github.com/cimbolicproductions/ai-f
 - `lib/os-runtime.cjs`: Work orders, dispatch, report parsing, `answerNotice`, board watcher.
 - `lib/notices.cjs`: Every question or update for a person. All surfaces read this one book.
 - `lib/audit-loop.cjs`: The Audit action and findings-to-fix-tasks loop.
+- `lib/versions.cjs`: Versions of a build. Owner notes and review findings are combined into one brief for the next version.
 - `lib/sheet-board.cjs`: Creates the owner's board Sheet and mirrors the local board into it. The local board stays the engine.
 - `lib/activity.cjs`: The short live line of what each working agent is doing. Kept beside the board, never in it.
 - `lib/project-brief.cjs`: One brief per project in the vault, written by the software as work lands.

@@ -452,12 +452,14 @@ test("9. builder/auditor loop closes itself: the other agent checks, findings re
   }, "P2");
   assert.match(auditPrompt, /This Is An Audit/);
   const fixes = board.listTasks({ status: "Open" });
-  assert.equal(fixes.length, 2);
-  assert.ok(fixes.every(r => r.To === "claude"), "findings go back to the builder");
+  // Both findings travel together as one brief for version 2, back to the builder.
+  assert.equal(fixes.length, 1);
+  assert.equal(fixes[0].To, "claude");
+  assert.match(fixes[0].Task, /^Version 2 of P1: 2 fixes from the review$/);
+  assert.ok(board.getMeta(fixes[0].ID).delegatedWork.includes("1. Null check missing in save()\n2. Test name is wrong"));
+  assert.deepEqual(auditOffers(board), [], "not offered until version 2 lands");
 
   await run(doneRunner(), fixes[0].ID);
-  assert.deepEqual(auditOffers(board), [], "not offered until every fix lands");
-  await run(doneRunner(), fixes[1].ID);
   // Every fix landed, so the second check starts on its own too.
   const second = board.listTasks({ status: "Open" });
   assert.equal(second.length, 1);
