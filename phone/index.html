@@ -26,7 +26,7 @@
   #send { width:100%; margin-top:10px; }
   #taskActions { display:flex; flex-wrap:wrap; gap:8px; margin-top:10px; }
   #taskActions button { flex:1 1 auto; padding:10px 12px; font-size:15px; }
-  #voiceHelp, #sheetHint { color:var(--muted); font-size:14px; margin-top:8px; }
+  #sheetHint { color:var(--muted); font-size:14px; margin-top:8px; }
   #sheetRows { list-style:none; }
   #sheetRows li { display:flex; align-items:flex-start; gap:10px; justify-content:space-between; }
   #sheetRows button { flex:none; padding:7px 11px; font-size:14px; }
@@ -34,10 +34,6 @@
   #editTask label { display:block; margin:10px 0 5px; }
   #editTask textarea { min-height:88px; }
   #editTask select { font:inherit; color:var(--text); background:var(--bg); border:1px solid var(--line); border-radius:8px; padding:8px; }
-  #agents { display:flex; gap:8px; overflow-x:auto; margin-top:12px; scrollbar-width:none; }
-  #agents::-webkit-scrollbar { display:none; }
-  #agents button { flex:none; padding:7px 13px; font-size:14px; font-weight:500; background:var(--card); color:var(--text); border:1px solid var(--line); }
-  #agents button.on { background:var(--text); color:var(--bg); }
   #msg { min-height:22px; color:var(--muted); font-size:15px; margin:10px 0 0; }
   h2 { font-size:13px; letter-spacing:.04em; text-transform:uppercase; color:var(--muted); font-weight:600; margin:32px 0 10px; }
   .notice { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:14px; margin-bottom:10px; overflow-wrap:anywhere; }
@@ -66,12 +62,10 @@
   <textarea id="ask" placeholder="What do you need?" maxlength="4000"></textarea>
   <div id="taskActions">
     <button type="button" id="voice" class="soft" aria-pressed="false">Voice dump</button>
-    <button type="button" id="saveTasks" class="soft">Save tasks</button>
-    <button type="button" id="viewTasks" class="soft">View tasks</button>
+    <button type="button" id="saveTasks" class="soft" hidden>Save to sheet</button>
+    <button type="button" id="viewTasks" class="soft" hidden>Sheet tasks</button>
   </div>
-  <p id="voiceHelp">Say your tasks. Say “next task” between them, or put each on its own line. Review them, then tap Save tasks.</p>
-  <div id="agents"></div>
-  <button id="send">Ask Muse</button>
+  <button id="send">Send</button>
   <p id="msg" role="status"></p>
   <section id="sheetWrap" hidden>
     <h2>Your task sheet</h2>
@@ -115,10 +109,8 @@
   if (!backend || !token) { $("nolink").hidden = false; return; }
   $("boot").hidden = false;
 
-  let target = null;
   let vapidKey = null;
   let sending = false;
-  let lastAgents = "";
   let lastAsks = "";
   const answered = new Set();
   const pendingKey = "aios-sheet-request:" + backend;
@@ -157,6 +149,7 @@
 
   function sheetButtons() {
     const busy = sheetBusy || Boolean(pendingSheet);
+    $("saveTasks").hidden = $("viewTasks").hidden = !sheetAvailable;
     $("saveTasks").disabled = busy || Boolean(recognition);
     $("viewTasks").disabled = $("updateTask").disabled = busy;
   }
@@ -306,7 +299,7 @@
     const Speech = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!Speech) {
       $("ask").focus();
-      say("Tap the microphone on your keyboard to dictate. Then tap Save tasks.");
+      say("Tap the microphone on your keyboard and talk. Then tap Send.");
       return;
     }
     const draft = $("ask").value.trimEnd();
@@ -319,7 +312,7 @@
       $("voice").textContent = "Stop recording";
       $("voice").setAttribute("aria-pressed", "true");
       sheetButtons();
-      say("Listening. Say “next task” between tasks.");
+      say("Listening…");
     };
     speech.onresult = event => {
       const said = Array.from(event.results, result => result[0].transcript).join(" ").trim();
@@ -328,17 +321,17 @@
     };
     speech.onerror = () => {
       voiceError = true;
-      say("Use the microphone on your keyboard to dictate, or type your tasks.");
+      say("Tap the microphone on your keyboard and talk, or type.");
     };
     speech.onend = () => {
       recognition = null;
       $("voice").textContent = "Voice dump";
       $("voice").setAttribute("aria-pressed", "false");
       sheetButtons();
-      if (!voiceError) say("Review what you said, then tap Save tasks.");
+      if (!voiceError) say("Tap Send.");
     };
     try { speech.start(); recognition = speech; sheetButtons(); }
-    catch { $("ask").focus(); say("Use the microphone on your keyboard to dictate."); }
+    catch { $("ask").focus(); say("Tap the microphone on your keyboard and talk."); }
   };
 
   function noticeCard(n) {
@@ -374,20 +367,6 @@
     return card;
   }
 
-  function renderAgents(agents) {
-    const wrap = $("agents");
-    wrap.replaceChildren();
-    if (agents.length < 2) return;
-    [{ id: null, label: "Anyone" }, ...agents].forEach(a => {
-      const b = document.createElement("button");
-      b.textContent = a.label;
-      b.className = a.id === target ? "on" : "";
-      b.setAttribute("aria-pressed", String(a.id === target));
-      b.onclick = () => { target = a.id; renderAgents(agents); };
-      wrap.append(b);
-    });
-  }
-
   async function refresh() {
     try {
       const s = await call("GET", "status");
@@ -397,8 +376,6 @@
       $("homeText").textContent = s.home.online
         ? "Home computer online"
         : "Home computer offline" + (s.queued ? " · " + s.queued + " waiting for it" : " · requests will wait for it");
-      const agentKey = JSON.stringify(s.agents || []);
-      if (agentKey !== lastAgents) { lastAgents = agentKey; renderAgents(s.agents || []); }
       const open = s.notices.filter(n => !answered.has(n.id));
       const asks = open.filter(n => n.choices && n.choices.length);
       const info = open.filter(n => !(n.choices && n.choices.length));
@@ -426,7 +403,7 @@
     sending = true;
     $("send").disabled = true;
     try {
-      await call("POST", "request", { text, to: target });
+      await call("POST", "request", { text });
       $("ask").value = "";
       say("Sent.");
       refresh();

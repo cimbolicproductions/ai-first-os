@@ -1,12 +1,12 @@
 # AI-first OS
 
-One board for all your AI agents. Claude Code, Codex, Gemini, Antigravity and Cursor work from the same list, check each other's work, and reach you on your phone when they need you.
+Say what you need. Your AI agents do the work, check each other, and reach you on your phone when they need you.
+
+It works with the ones you already have: Claude Code, Codex, Gemini, Antigravity, Cursor. One is enough.
 
 ## Get started
 
-Double-click the installer for your computer. It sets itself up, including its own runtime if you need one.
-
-Three windows follow, once: a welcome, who should run the show, and the rest of your sign-ins. Everything is already filled in. You land in Easy mode with a place to type and a board that shows what is happening.
+Double-click the installer for your computer. Press Enter three times. Type or say your first request.
 
 From source, with Node 22 or newer and nothing to install:
 
@@ -14,39 +14,27 @@ From source, with Node 22 or newer and nothing to install:
 node bin/aios.cjs desktop
 ```
 
-## How it works
+## What happens in the box
 
-**Start with a request.** Type a question or press `Space` to focus the request box. Send it and follow the reply and progress on the board. Select a queued task and press `R` or click Run to start it now. Use Advanced mode to choose an agent yourself or inspect the technical details.
+**You talk. It organizes.** Type a request or tap **Voice dump** and say everything on your mind. Your organizer turns it into separate tasks on the board and gives each one to the right agent.
 
-**Muse coordinates.** A question about open tasks reads the configured board. For other requests, Muse uses a signed-in terminal agent to answer, ask for details, or delegate to a builder, researcher, or reviewer. Reply on the same request. The board shows which service is working and when another takes over. Use **AI services** to check which agents are installed and signed in.
+**The work gets checked.** When one agent finishes building, another checks it. Anything it finds goes back to be fixed, then gets checked again. If you only have one agent, it checks its own work and says so.
 
-**Your task list.** With a connected Google Sheet, ask “What tasks are at hand?” to read its open tasks. To capture several tasks, choose **Add tasks** or **Voice dump**, review one task per line, then choose **Save tasks**. Use **Sheet tasks** to update a title or status. The app confirms the saved task IDs before clearing the draft.
+**It keeps going.** If an agent is signed out or at its limit, another one takes the task and the board says who. If nobody can take it right now, it waits a minute and tries again.
 
-**Connect a Sheet.** The workspace manifest can use the existing service account configuration or a signed-in Codex CLI with the Google Drive app connected. For Codex, set `board.mode` to `sheets` and set `board.sheets` to an object with `provider: "codex"`, your `boardId`, and an optional `ownerName` and `assignee`. The Sheet uses the Agent Tasks columns in its Tasks and Done tabs. Keep credentials and your Sheet ID in your local workspace.
+**It asks once.** If a task needs a choice or a connection you have not made, it asks in plain words at that moment and remembers.
 
-**Audit.** When a build lands, you get one button. The other agent reviews the work, and anything it finds goes back to the builder as fix tasks. Nobody relays anything.
-
-**Asked once.** If something needs a choice you have not made, it asks in plain words at that moment and remembers.
-
-**Your phone.** Choose **Use your phone**, select **Connect my phone**, sign in, and open the private link on your phone. Send requests from that link. Blocked work comes back in plain words with one-tap yes or no. The phone shows honestly whether your computer is online, and requests wait for it if it is not.
-
-**Your notes stay yours.** The vault is plain folders and Markdown on your own computer, or an Obsidian vault if you prefer. Nothing uploads it. One skills folder serves every agent.
+**Your phone is the front door.** Choose **Use your phone**, sign in, and open your private link. Send requests from anywhere. Questions come back with one-tap answers. The phone shows honestly whether your computer is online, and requests wait for it if it is not.
 
 **Some things always ask first.** Any spending, anything sent to other people, any public submission, and any refund or billing change need your explicit yes, every time.
 
-## Keys
+**Your notes stay yours.** Plain folders and Markdown on your own computer. Nothing uploads them.
 
-| Key | Does |
-| --- | --- |
-| `1`-`6` | Board, Claude, Codex, Gemini, Antigravity, Cursor |
-| `Space` | New task |
-| `r` | Run the selected task |
-| `a` | Audit it |
-| `d` | What your agents did today |
-| `o` | Who does what |
-| `v` | Say a task |
+## If you want to look behind the box
 
-Easy mode shows the shortcuts for sending and running a request. The full keyboard controls are available in Advanced mode and the terminal shell (`node bin/aios.cjs`). Run `node bin/aios.cjs help` for the commands.
+You never have to. **Advanced mode** shows every task, who has it, and the technical details, and lets you run, audit, or reassign by hand. `node bin/aios.cjs help` lists the terminal commands.
+
+A Google Sheet can be the task list. Today that takes a signed-in Codex with Google Drive connected and one entry in your workspace file: `board.mode` set to `sheets`, and `board.sheets` set to `provider: "codex"` plus your `boardId`.
 
 ## For developers
 
@@ -55,7 +43,7 @@ npm test                            # run the tests
 node scripts/build-installer.cjs     # build the installers into dist/
 ```
 
-To add a harness, add one entry to `lib/harness-registry.cjs`.
+To add an agent, add one entry to `lib/harness-registry.cjs`. `AGENTS.md` has the file map.
 
 ## License
 
