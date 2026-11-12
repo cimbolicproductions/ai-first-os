@@ -46,7 +46,7 @@ node bin/aios.cjs desktop
 
 ## If you want to look behind the box
 
-You never have to. **Advanced mode** shows every task, who has it, and the technical details, and lets you run, audit, or reassign by hand. `node bin/aios.cjs help` lists the terminal commands.
+You never have to. **Detailed** (top right) shows every task, who has it, and the technical details, and lets you run, audit, or reassign by hand. `node bin/aios.cjs help` lists the terminal commands.
 
 ## For developers
 
