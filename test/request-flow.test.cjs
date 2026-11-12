@@ -10,7 +10,7 @@ const { createLocalBoard } = require("../adapters/local-board.cjs");
 const { createNoticeBook } = require("../lib/notices.cjs");
 const { auditOffers } = require("../lib/audit-loop.cjs");
 const { answerNotice, defaultCliRunner, dispatchBoardTask, queueOrganizerRequest, replyToOrganizer } = require("../lib/os-runtime.cjs");
-const { summarizeOpenTasks } = require("../lib/request-flow.cjs");
+const { summarizeOpenTasks, parseRequestResult } = require("../lib/request-flow.cjs");
 
 function setup(t) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "aios-request-"));
@@ -30,6 +30,82 @@ function setup(t) {
   });
   return { dir, board, notices, manifest, availability, queue, run };
 }
+
+test("a voice dump becomes separate board tasks, one owner each, and gated work still asks", async t => {
+  const { board, notices, queue, run } = setup(t);
+  const row = queue("ok so fix the login bug on the site\nnext task look up what competitors charge\nalso email the landlord about the lease");
+  assert.equal(row.To, "muse");
+  await run(row, async ({ mode, prompt }) => {
+    assert.equal(mode, "read");
+    assert.match(prompt, /"status":"tasks"/);
+    return { status: "Waiting on User", result: "tasks", answer: "Three things, on the board now.", split: [
+      { role: "builder", work: "Fix the login bug on the site" },
+      { role: "researcher", work: "Look up what competitors charge" },
+      { role: "builder", work: "Email the landlord about the lease" },
+    ] };
+  });
+  assert.equal(board.findTask(row.ID).Status, "Done");
+  const [fix, research, send] = board.listTasks().slice(1);
+  assert.deepEqual([fix.To, fix.Status, board.getMeta(fix.ID).kind], ["claude", "Open", "build"]);
+  assert.deepEqual([research.To, board.getMeta(research.ID).kind], ["gemini", "research"]);
+  assert.equal(board.getMeta(fix.ID).splitFrom, row.ID);
+  // Sending to another person is never handed straight to a worker.
+  assert.deepEqual([send.To, board.getMeta(send.ID).intent], ["muse", "external_action"]);
+  await run(send);
+  const approval = notices.listOpen().find(n => n.row === send.ID);
+  assert.equal(approval.kind, "approval");
+  assert.match(board.getMeta(row.ID).answer, /P2 Fix the login bug on the site · Claude Code/);
+  assert.match(board.getMeta(row.ID).answer, /needs your yes/);
+  assert.equal(notices.listOpen().some(n => /Muse put 3 things on the board/.test(n.text)), true);
+
+  // A question never turns into building nobody asked for.
+  const idle = queue("What do you think about the weather today?");
+  await run(idle, async () => ({ status: "Waiting on User", result: "tasks", answer: "Sure.", split: [{ role: "builder", work: "Rewrite the whole site" }] }));
+  const invented = board.listTasks().at(-1);
+  assert.deepEqual([invented.To, board.getMeta(invented.ID).musePhase], ["muse", "organize"]);
+
+  const line = text => parseRequestResult("thinking\nAIOS-RESULT: " + JSON.stringify(text));
+  assert.equal(line({ status: "tasks", answer: "Two.", tasks: [{ role: "builder", work: " A " }, { role: "researcher", work: "B" }] }).split[0].work, "A");
+  assert.equal(line({ status: "tasks", answer: "None.", tasks: [] }), null);
+  assert.equal(line({ status: "tasks", answer: "Bad role.", tasks: [{ role: "owner", work: "A" }] }), null);
+  assert.equal(line({ status: "tasks", answer: "Too many.", tasks: Array.from({ length: 9 }, () => ({ role: "builder", work: "A" })) }), null);
+});
+
+test("a temporary failure retries on its own, then asks only when it keeps failing", async t => {
+  const { board, notices, queue, dir, manifest } = setup(t);
+  const row = queue("Fix the login bug");
+  let clock = 1000;
+  let calls = 0;
+  const down = async () => { calls++; throw Object.assign(new Error("Claude Code could not run: token is refreshing"), { code: "AGENT_UNAVAILABLE" }); };
+  const go = (runner, taskId) => dispatchBoardTask({ workspaceRoot: dir, board, manifest, notices, availability: { claude: true }, runner, now: () => clock, ...(taskId ? { taskId } : {}) });
+
+  const first = await go(down, row.ID);
+  assert.deepEqual([first.dispatched, first.reason, first.retryInMs], [false, "RETRY_SCHEDULED", 60000]);
+  assert.equal(board.findTask(row.ID).Status, "Open");
+  assert.equal(notices.listOpen().length, 0, "the owner is not asked about a hiccup");
+  assert.match(board.findTask(row.ID)["Latest note"], /Trying again in 1 minute\./);
+  assert.equal(board.getMeta(row.ID).progress.at(-1).stage, "retrying");
+
+  // Until the minute is up the row is left alone, and other work is not blocked behind it.
+  assert.equal((await go(down)).reason, "NO_OPEN_TASKS");
+  assert.equal(calls, 1);
+
+  clock += 60001;
+  const second = await go(async ({ mode }) => mode === "read"
+    ? { status: "Waiting on User", result: "delegate", answer: "Sending it to a builder.", delegation: { role: "builder", work: "Fix the login bug" } }
+    : { status: "Done", answer: "Fixed." });
+  assert.equal(second.status, "Done");
+
+  // Three misses in a row and it stops and says so.
+  const stuck = queue("Fix the signup bug");
+  for (const wait of [60000, 120000, 300000]) {
+    assert.equal((await go(down, stuck.ID)).retryInMs, wait);
+    clock += wait + 1;
+  }
+  const last = await go(down, stuck.ID);
+  assert.equal(last.status, "Waiting on User");
+  assert.equal(notices.listOpen().some(n => n.row === stuck.ID && n.choices[0].label === "Try again"), true);
+});
 
 test("an open-task question answers locally without an agent or audit", async t => {
   const { board, queue, run } = setup(t);
@@ -125,9 +201,11 @@ test("Muse clarifies, keeps the answer on one row, and hands clear coding to the
     return { status: "Done", answer: "Fixed and verified with the login test." };
   });
   assert.deepEqual(roles, [["claude", "read"], ["claude", "write"]]);
-  assert.equal(board.listTasks().length, 1);
   assert.equal(board.getMeta(row.ID).progress.some(event => event.stage === "delegated"), true);
-  assert.equal(auditOffers(board)[0].row, row.ID);
+  // The delegated build is checked without anyone asking for it.
+  assert.equal(board.listTasks().length, 2);
+  assert.equal(board.getMeta(board.listTasks()[1].ID).auditOf, row.ID);
+  assert.deepEqual(auditOffers(board), []);
 });
 
 test("a mixed status request and email cannot bypass the action gate", async t => {

@@ -429,21 +429,20 @@ test("8. default slate needs no setup, and substitution routes around a missing 
   assert.equal(routeTask({ assigned: "agy", manifest, availability: only("antigravity") }).agent, "antigravity");
 });
 
-test("9. builder/auditor loop: one action, symmetric pairing, findings return as fix tasks", async t => {
+test("9. builder/auditor loop closes itself: the other agent checks, findings return as fix tasks, fixes are rechecked", async t => {
   const { dir, manifest, board, notices } = makeOS(t);
   const availability = only("claude", "codex");
   const run = (runner, taskId) => dispatchBoardTask({ workspaceRoot: dir, manifest, board, notices, availability, runner, taskId });
 
   board.addTask({ task: "Build the thing", to: "claude" });
   await run(doneRunner(), "P1");
-  assert.deepEqual(auditOffers(board).map(o => o.row), ["P1"]);
-  const offered = notices.listOpen().find(n => n.row === "P1" && n.kind === "done");
-  assert.deepEqual(offered.choices.map(c => c.label), ["Audit", "Not now"]);
-
-  const answered = answerNotice({ noticeId: offered.id, value: "audit", digest: offered.digest, notices, board, manifest, availability });
-  assert.equal(answered.audit.auditor, "codex");
-  assert.equal(answered.audit.auditRow.To, "codex");
+  // Nobody tapped anything: the other agent is already checking the work.
+  assert.equal(board.findTask("P2").To, "codex");
+  assert.equal(board.getMeta("P2").auditOf, "P1");
   assert.deepEqual(auditOffers(board), []);
+  const told = notices.listOpen().find(n => n.row === "P1" && n.kind === "done");
+  assert.match(told.text, /Claude Code finished: Build the thing. Codex is checking it./);
+  assert.equal(notices.listOpen().some(n => n.choices.length), false, "nothing waits on the owner");
 
   let auditPrompt = "";
   await run(async ({ prompt, mode }) => {
@@ -459,12 +458,51 @@ test("9. builder/auditor loop: one action, symmetric pairing, findings return as
   await run(doneRunner(), fixes[0].ID);
   assert.deepEqual(auditOffers(board), [], "not offered until every fix lands");
   await run(doneRunner(), fixes[1].ID);
-  assert.deepEqual(auditOffers(board).map(o => o.row), ["P1"]);
-  assert.equal(notices.listOpen().some(n => /Audit it again/.test(n.text)), true);
-
-  const second = requestAudit({ board, manifest, buildRowId: "P1", availability, notices });
-  await run(doneRunner({ clean: true }), second.auditRow.ID);
+  // Every fix landed, so the second check starts on its own too.
+  const second = board.listTasks({ status: "Open" });
+  assert.equal(second.length, 1);
+  assert.equal(board.getMeta(second[0].ID).round, 2);
+  assert.equal(notices.listOpen().some(n => n.choices.length), false, "still nothing waits on the owner");
+  await run(doneRunner({ clean: true }), second[0].ID);
   assert.equal(board.getMeta("P1").audit.state, "clean");
+  assert.equal(notices.listOpen().some(n => /Codex checked Claude Code's work on P1 and found nothing to fix./.test(n.text)), true);
+
+  // The loop stops itself: after three rounds of findings it asks once instead of going forever.
+  {
+    const loop = makeOS(t);
+    const go = (runner, taskId) => dispatchBoardTask({ workspaceRoot: loop.dir, manifest: loop.manifest, board: loop.board, notices: loop.notices, availability, runner, taskId });
+    loop.board.addTask({ task: "Never quite right", to: "claude" });
+    await go(doneRunner(), "P1");
+    for (let round = 1; round <= 3; round++) {
+      const auditRow = loop.board.listTasks({ status: "Open" })[0];
+      assert.equal(loop.board.getMeta(auditRow.ID).round, round);
+      await go(doneRunner({ findings: ["Still wrong"] }), auditRow.ID);
+      await go(doneRunner(), loop.board.listTasks({ status: "Open" })[0].ID);
+    }
+    assert.deepEqual(loop.board.listTasks({ status: "Open" }), []);
+    const ask = loop.notices.listOpen().find(n => n.choices.length);
+    assert.match(ask.text, /checked 3 times/);
+  }
+
+  // One agent runs the whole loop and says so plainly.
+  {
+    const solo = makeOS(t);
+    solo.board.addTask({ task: "Solo build", to: "claude" });
+    await dispatchBoardTask({ workspaceRoot: solo.dir, manifest: solo.manifest, board: solo.board, notices: solo.notices, availability: only("claude"), runner: doneRunner(), taskId: "P1" });
+    assert.equal(solo.board.findTask("P2").To, "claude");
+    assert.match(solo.notices.listOpen().find(n => n.row === "P1").text, /only agent signed in, so it is checking its own work/);
+  }
+
+  // Switched off, a finished build offers the one Audit action instead.
+  manifest.settings.autoAudit = false;
+  board.addTask({ task: "Manual build", to: "claude" });
+  const manual = board.listTasks({ status: "Open" })[0].ID;
+  await run(doneRunner(), manual);
+  const offered = notices.listOpen().find(n => n.row === manual && n.kind === "done");
+  assert.deepEqual(offered.choices.map(c => c.label), ["Audit", "Not now"]);
+  const answered = answerNotice({ noticeId: offered.id, value: "audit", digest: offered.digest, notices, board, manifest, availability });
+  assert.equal(answered.audit.auditor, "codex");
+  await run(doneRunner({ clean: true }), answered.audit.auditRow.ID);
 
   // Codex builds, Claude audits.
   assert.equal(pickAuditor({ builder: "codex", manifest, availability }).agent, "claude");
@@ -569,6 +607,7 @@ test("11. work reaches agents without a shell, and silent auth failures are caug
 
   // A failing agent hands the row to the next one rather than stopping.
   const { manifest, board, notices } = makeOS(t);
+  manifest.settings.autoAudit = false;
   board.addTask({ task: "Do it", to: "codex" });
   const tried = [];
   const res = await dispatchBoardTask({
@@ -1128,6 +1167,7 @@ test("18b. the logo animation lines up, loops cleanly, and is served everywhere 
 test("19. daily summary in plain words, with undo only where undo is real", async t => {
   const { dir, manifest, board, notices } = makeOS(t);
   assert.equal(buildDailySummary({ board, notices }).headline, "Nothing has run yet today.");
+  manifest.settings.autoAudit = false;
 
   board.addTask({ task: "Ship the page", to: "claude" });
   await dispatchBoardTask({ workspaceRoot: dir, manifest, board, notices, availability: everyone(), runner: doneRunner() });
