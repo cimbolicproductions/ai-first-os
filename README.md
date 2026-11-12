@@ -24,6 +24,8 @@ node bin/aios.cjs desktop
 
 **It takes the notes.** Each project gets one brief in your vault: the goal, where it lives, what happened, and what is next. Any agent can open it and carry on.
 
+**You can watch it work.** Four tabs: Chat, Coding, Research, and Tasks. While an agent works, one short line says what it is doing right now, like "Reading index.html." Tasks is the plain list of everything open, each with a **Get to work** button.
+
 **It knows your projects.** It finds the project folders on your computer and their GitHub names. Mention one and the work happens there. If it could be more than one, it asks.
 
 **The work gets checked.** When one agent finishes building, another checks it. Anything it finds goes back to be fixed, then gets checked again. If you only have one agent, it checks its own work and says so. Turn **Outside review** off if you do not want it.
