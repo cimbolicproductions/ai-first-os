@@ -80,15 +80,15 @@ test("asking in plain words makes the Sheet, and the board shows up in it with o
   const boardId = mirrorTarget(manifest);
   assert.ok(boardId, "the Sheet is remembered without anyone pasting an ID");
   assert.match(board.getMeta(row.ID).answer, /lives in a Google Sheet, and I keep it current\.\nhttps:\/\/docs\.google\.com\/spreadsheets\/d\//);
-  assert.equal(google.files.get(boardId).tabs[0].title, "Board");
+  assert.equal(google.files.get(boardId).tabs[0].title, "Tasks");
 
   board.addTask({ task: "Fix the login bug", to: "claude" });
   const state = {};
   assert.equal((await syncBoardSheet({ call: google.call, boardId, board, state })).changed, true);
   const [headers, first, second] = google.rows(boardId);
-  assert.deepEqual(headers, ["ID", "Task", "Who has it", "Status", "Latest note", "Updated"]);
+  assert.deepEqual(headers, ["ID", "Task", "To", "Status", "Latest note", "Order", "From", "Updated", "Created", "Spec file"]);
   assert.deepEqual(first.slice(0, 4), [row.ID, "Put my board in a Google Sheet", "Muse", "Done"]);
-  assert.deepEqual(second.slice(0, 4), ["P2", "Fix the login bug", "Claude Code", "Queued"]);
+  assert.deepEqual(second.slice(0, 4), ["P2", "Fix the login bug", "Claude Code", "Open"]);
   assert.doesNotMatch(first[4], /\[RUN /, "claim markers stay out of what a person reads");
 
   // Nothing changed, so Google is not called again. A change is written on the next pass.

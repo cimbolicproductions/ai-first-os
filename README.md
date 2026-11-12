@@ -18,9 +18,15 @@ node bin/aios.cjs desktop
 
 **You talk. It organizes.** Type a request or tap **Voice dump** and say everything on your mind. Your organizer turns it into separate tasks on the board and gives each one to the right agent.
 
+**It asks before it builds.** If you say "build me a website," it first asks what it is for, who will use it, and what finished looks like. Then it goes to work.
+
+**You pick the crew.** Under the box, choose your organizer, your first and second coding agent, and your first and second research agent. If the first is busy or out, the second takes it.
+
+**It takes the notes.** Each project gets one brief in your vault: the goal, where it lives, what happened, and what is next. Any agent can open it and carry on.
+
 **It knows your projects.** It finds the project folders on your computer and their GitHub names. Mention one and the work happens there. If it could be more than one, it asks.
 
-**The work gets checked.** When one agent finishes building, another checks it. Anything it finds goes back to be fixed, then gets checked again. If you only have one agent, it checks its own work and says so.
+**The work gets checked.** When one agent finishes building, another checks it. Anything it finds goes back to be fixed, then gets checked again. If you only have one agent, it checks its own work and says so. Turn **Outside review** off if you do not want it.
 
 **It keeps going.** If an agent is signed out or at its limit, another one takes the task and the board says who. If nobody can take it right now, it waits a minute and tries again.
 
