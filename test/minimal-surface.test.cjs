@@ -34,7 +34,7 @@ test("the desktop leaves Sheet controls out until a Sheet is connected", async t
   const manifest = {
     board: { mode: "local", localDir: path.join(dir, "board") },
     ideology: { routerFunnel: "Muse" },
-    roles: { orchestrator: "muse", builder: "claude", auditor: "codex", researcher: "gemini" },
+    roles: { orchestrator: "muse", builder: "claude", auditor: "codex", researcher: "antigravity" },
   };
   const serve = async sheetTasks => {
     const server = createDesktopServer({ workspaceRoot: dir, manifest, board, detect: () => [], ...(sheetTasks ? { sheetTasks } : {}) });

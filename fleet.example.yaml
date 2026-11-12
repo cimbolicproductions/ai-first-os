@@ -45,13 +45,13 @@ agents:
     role: "build"
   codex:
     role: "build"
-  gemini:
+  antigravity:
     role: "research"
 
 connections:
   github:
     type: "mcp"
-    agents: ["claude", "codex", "gemini"]
+    agents: ["claude", "codex", "antigravity"]
     secretName: "GITHUB_TOKEN"
   voice-api:
     type: "rest"

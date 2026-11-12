@@ -28,7 +28,7 @@ function setup(t) {
   const manifest = {
     board: { mode: "local", localDir: boardDir },
     ideology: { routerFunnel: "Muse" },
-    roles: { orchestrator: "muse", builder: "claude", researcher: "gemini", auditor: "codex" },
+    roles: { orchestrator: "muse", builder: "claude", researcher: "antigravity", auditor: "codex" },
     settings: {},
   };
   const projects = discoverProjects({ roots: [code] });

@@ -56,7 +56,7 @@ function buildManifestFromProfile(profile, workspaceRoot) {
   }
 
   const builders = profile.agents?.builders || ["claude", "codex"];
-  const researchers = profile.agents?.researchers || ["gemini"];
+  const researchers = profile.agents?.researchers || ["antigravity"];
   const connections = {
     github: {
       type: "mcp",
@@ -137,7 +137,8 @@ function syncWorkspaceConfigs(manifest, workspaceRoot, profile = {}) {
   const agentFiles = [
     ["CLAUDE.md", "claude", "build"],
     ["AGENTS.md", "codex", "build"],
-    ["GEMINI.md", "gemini", "research"],
+    // Research instructions, under the file name Gemini-model tools look for.
+    ["GEMINI.md", "antigravity", "research"],
   ];
 
   for (const [filename, agentName, role] of agentFiles) {

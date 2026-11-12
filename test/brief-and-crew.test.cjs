@@ -23,7 +23,7 @@ function setup(t) {
     vaultPath: path.join(dir, "vault"),
     board: { mode: "local", localDir: boardDir },
     ideology: { routerFunnel: "Muse" },
-    roles: { orchestrator: "muse", builder: "claude", researcher: "gemini", auditor: "codex" },
+    roles: { orchestrator: "muse", builder: "claude", researcher: "antigravity", auditor: "codex" },
     settings: {},
   };
   const projects = [{ name: "bakery-site", path: path.join(dir, "bakery-site"), repo: "acme/bakery-site" }];
@@ -111,9 +111,9 @@ test("first and second choice per role, saved from the quiet pickers under the b
   const base = `http://127.0.0.1:${server.address().port}`;
   const post = body => fetch(`${base}/api/crew`, { method: "POST", headers: { "content-type": "application/json", origin: base }, body: JSON.stringify(body) }).then(r => r.json());
 
-  assert.deepEqual((await (await fetch(`${base}/api/state`)).json()).crew.priorities, { builder: ["claude"], researcher: ["gemini"] });
+  assert.deepEqual((await (await fetch(`${base}/api/state`)).json()).crew.priorities, { builder: ["claude"], researcher: ["antigravity"] });
   assert.equal((await post({ role: "builder", order: ["codex", "claude"] })).ok, true);
-  assert.equal((await post({ role: "researcher", order: ["antigravity", "gemini"] })).ok, true);
+  assert.equal((await post({ role: "researcher", order: ["antigravity", "claude"] })).ok, true);
   assert.equal((await post({ organizer: "grokbot" })).ok, true);
   assert.equal((await post({ outsideReview: false })).ok, true);
   assert.equal((await post({ role: "builder", order: ["not-an-agent"] })).ok, false);
@@ -121,11 +121,11 @@ test("first and second choice per role, saved from the quiet pickers under the b
 
   const { crew } = await (await fetch(`${base}/api/state`)).json();
   assert.deepEqual([crew.organizer, crew.outsideReview], ["grokbot", false]);
-  assert.deepEqual(crew.priorities, { builder: ["codex", "claude"], researcher: ["antigravity", "gemini"] });
+  assert.deepEqual(crew.priorities, { builder: ["codex", "claude"], researcher: ["antigravity", "claude"] });
   assert.match(await (await fetch(base)).text(), /id="crewRow"/);
 
   // The order is what routing follows when the first choice is out.
-  const out = { codex: false, claude: true, gemini: true, antigravity: false, cursor: true };
+  const out = { codex: false, claude: true, antigravity: false, cursor: true };
   assert.equal(routeTask({ assigned: "codex", manifest, availability: out, role: "builder" }).agent, "claude");
-  assert.equal(routeTask({ assigned: "antigravity", manifest, availability: out, role: "researcher" }).agent, "gemini");
+  assert.equal(routeTask({ assigned: "antigravity", manifest, availability: out, role: "researcher" }).agent, "claude");
 });

@@ -56,7 +56,7 @@ test("2. end-to-end AI-first OS init + task board dispatch + doctor connects boa
       agents: {
         router: "Router",
         builders: ["claude", "codex"],
-        researchers: ["gemini"],
+        researchers: ["antigravity"],
       },
       boardMode: "local",
       vaultPath: "./ContextVault",
@@ -85,7 +85,7 @@ test("2. end-to-end AI-first OS init + task board dispatch + doctor connects boa
     const board = createLocalBoard({ boardDir: path.join(tmp, "board"), routerName: "Router" });
     const p2 = board.addTask({
       task: "Research vector index benchmarks and write summary",
-      to: "gemini",
+      to: "antigravity",
       from: "Router",
     });
     assert.equal(p2.ID, "P2");
@@ -103,7 +103,7 @@ test("2. end-to-end AI-first OS init + task board dispatch + doctor connects boa
         },
       },
       async runner({ agent, prompt }) {
-        assert.equal(agent, "gemini");
+        assert.equal(agent, "antigravity");
         assert.match(prompt, /AI-first OS Work Order: P2/);
         assert.match(prompt, /Connected Services: github \(mcp\)/);
         return {
@@ -232,7 +232,7 @@ test("5. TUI & Desktop HUD support service dropdown connect, native voice-to-tex
         primaryGoal: "Keyboard-first AI workflow",
         roles: ["Builder"],
         routerName: "Router",
-        agents: { router: "Router", builders: ["claude", "codex"], researchers: ["gemini"] },
+        agents: { router: "Router", builders: ["claude", "codex"], researchers: ["antigravity"] },
         boardMode: "local",
         vaultPath: "./ContextVault",
       },
@@ -366,7 +366,7 @@ test("6. the old product name is gone and the license is real", () => {
 });
 
 test("7. harness registry is open: Cursor slots in, sign-in states are honest, keys stay one move", t => {
-  assert.deepEqual(laneList().map(l => `${l.key}:${l.id}`), ["1:board", "2:claude", "3:codex", "4:gemini", "5:antigravity", "6:cursor"]);
+  assert.deepEqual(laneList().map(l => `${l.key}:${l.id}`), ["1:board", "2:claude", "3:codex", "4:antigravity", "5:cursor"]);
   for (const h of HARNESSES) {
     assert.ok(h.run && h.signIn && h.models.length && h.authFiles, `${h.id} is complete`);
   }
@@ -399,7 +399,7 @@ test("7. harness registry is open: Cursor slots in, sign-in states are honest, k
 });
 
 test("8. default slate needs no setup, and substitution routes around a missing agent honestly", async t => {
-  assert.deepEqual(DEFAULT_SLATE, { orchestrator: "muse", builder: "claude", auditor: "codex", researcher: "gemini" });
+  assert.deepEqual(DEFAULT_SLATE, { orchestrator: "muse", builder: "claude", auditor: "codex", researcher: "antigravity" });
   assert.equal(buildRoleSlate({ builder: "codex" }).auditor, "claude");
   assert.equal(buildRoleSlate({ builder: "claude" }).auditor, "codex");
 
@@ -417,8 +417,8 @@ test("8. default slate needs no setup, and substitution routes around a missing 
 
   // Personal orchestrator cannot run here, so its rows still move.
   board.addTask({ task: "Triage this", to: "muse" });
-  const organised = await dispatchBoardTask({ workspaceRoot: dir, manifest, board, notices, availability: only("gemini"), runner: doneRunner() });
-  assert.equal(organised.agent, "gemini");
+  const organised = await dispatchBoardTask({ workspaceRoot: dir, manifest, board, notices, availability: only("antigravity"), runner: doneRunner() });
+  assert.equal(organised.agent, "antigravity");
 
   // With nobody signed in, the row waits and says why instead of stalling silently.
   board.addTask({ task: "Nobody home", to: "claude" });
@@ -534,9 +534,9 @@ test("10. just-in-time settings: asked once in plain words, saved, never asked a
   assert.equal(asked.text, "Claude Code is going to talk to another agent. Who do you want it to talk to?");
   assert.equal(asked.choices.some(c => c.value === "claude"), false);
 
-  const res = answerNotice({ noticeId: asked.id, value: "gemini", notices, board, manifest, saveManifest: saveManifestFake, availability: everyone() });
-  assert.equal(res.created.To, "gemini");
-  assert.equal(manifest.talkTo.claude, "gemini");
+  const res = answerNotice({ noticeId: asked.id, value: "antigravity", notices, board, manifest, saveManifest: saveManifestFake, availability: everyone() });
+  assert.equal(res.created.To, "antigravity");
+  assert.equal(manifest.talkTo.claude, "antigravity");
   assert.equal(saves, 1);
 
   board.addTask({ task: "Plan again", to: "claude" });
@@ -544,7 +544,7 @@ test("10. just-in-time settings: asked once in plain words, saved, never asked a
   await dispatchBoardTask({ workspaceRoot: dir, manifest, board, notices, availability: everyone(), taskId: board.listTasks({ to: "claude", status: "Open" })[0].ID, runner: async () => handoff });
   assert.equal(notices.listAll().filter(n => n.kind === "question").length, 1, "never asked twice");
   assert.ok(notices.listAll().length >= before);
-  assert.equal(board.listTasks({ to: "gemini", status: "Open" }).length, 2);
+  assert.equal(board.listTasks({ to: "antigravity", status: "Open" }).length, 2);
 
   // A service is asked for the first time a task needs it, not up front.
   delete manifest.connections.github;
@@ -604,7 +604,7 @@ test("11. work reaches agents without a shell, and silent auth failures are caug
   assert.equal(viaFile.args.some(a => a.includes("SECRET")), false);
   assert.equal(fs.readFileSync(path.join(dir, ".aios", "work-orders", "P1.md"), "utf8"), secretText);
 
-  await assert.rejects(defaultCliRunner({ agent: "gemini", prompt: "p", cwd: dir, task, detect, spawnFn: fakeSpawn("IneligibleTierError: not supported", 0) }), e => e.code === "AGENT_UNAVAILABLE");
+  await assert.rejects(defaultCliRunner({ agent: "codex", prompt: "p", cwd: dir, task, detect, spawnFn: fakeSpawn("IneligibleTierError: not supported", 0) }), e => e.code === "AGENT_UNAVAILABLE");
   await assert.rejects(defaultCliRunner({ agent: "claude", prompt: "p", cwd: dir, task, detect, spawnFn: fakeSpawn("", 0) }), e => e.code === "AGENT_FAILED");
 
   // A failing agent hands the row to the next one rather than stopping.
@@ -627,7 +627,7 @@ test("11. work reaches agents without a shell, and silent auth failures are caug
   board.addTask({ task: "Long chain", to: "codex" });
   const modes = [];
   await dispatchBoardTask({
-    workspaceRoot: dir, manifest, board, notices, availability: only("codex", "gemini", "antigravity"),
+    workspaceRoot: dir, manifest, board, notices, availability: only("codex", "cursor", "antigravity"),
     runner: async ({ agent, mode }) => {
       modes.push([agent, mode]);
       if (agent !== "antigravity") throw Object.assign(new Error("down"), { code: "AGENT_UNAVAILABLE" });
@@ -686,8 +686,8 @@ test("12. phone front door: a plain request becomes a board row, rings content-f
 
   // Sent while the computer is off: nothing is lost.
   assert.equal((await phone("POST", "request", { text: "Book the follow-up" })).ok, true);
-  assert.equal((await phone("POST", "request", { text: "Check the invoices", to: "gemini" })).ok, true);
-  assert.equal((await phone("POST", "request", { text: "Send an email to the team", to: "gemini" })).ok, true);
+  assert.equal((await phone("POST", "request", { text: "Check the invoices", to: "antigravity" })).ok, true);
+  assert.equal((await phone("POST", "request", { text: "Send an email to the team", to: "antigravity" })).ok, true);
   status = await phone("GET", "status");
   assert.equal(status.queued, 3);
   assert.deepEqual(Object.keys(rings[0]).sort(), ["event", "from", "machine", "row"]);
@@ -699,7 +699,7 @@ test("12. phone front door: a plain request becomes a board row, rings content-f
   const rows = env.board.listTasks();
   assert.equal(rows.length, 3);
   assert.equal(rows[0].To, "muse");
-  assert.equal(rows[1].To, "gemini");
+  assert.equal(rows[1].To, "antigravity");
   assert.equal(rows[2].To, "muse", "a chosen agent does not bypass the external action gate");
   assert.equal(env.board.getMeta(rows[2].ID).intent, "external_action");
   assert.equal(env.board.getMeta(rows[0].ID).source, "phone");
@@ -1079,7 +1079,7 @@ test("18. first run: three windows once, zero-config defaults, and the local app
   assert.doesNotMatch(buildDesktopHtml(), /innerHTML/, "untrusted board text is never rendered as HTML");
 
   const skipped = profileFromIntro({}, detected);
-  assert.deepEqual(skipped.roleSlate, { orchestrator: "muse", builder: "claude", auditor: "codex", researcher: "gemini" });
+  assert.deepEqual(skipped.roleSlate, { orchestrator: "muse", builder: "claude", auditor: "codex", researcher: "antigravity" });
 
   let introCompleted = 0;
   let signedInto = null;
@@ -1123,7 +1123,7 @@ test("18. first run: three windows once, zero-config defaults, and the local app
 
   const view = await (await fetch(`${base}/api/state`)).json();
   assert.equal(view.tasks.length, 0, "lands on an empty board ready for a first task");
-  assert.deepEqual(view.lanes.map(l => l.key), ["1", "2", "3", "4", "5", "6"]);
+  assert.deepEqual(view.lanes.map(l => l.key), ["1", "2", "3", "4", "5"]);
 
   const added = await (await post("/api/task", { task: "First task" })).json();
   assert.equal(added.task.To, "claude");
@@ -1266,12 +1266,17 @@ test("22. terminal shell keeps one-key switching, shows Cursor, and surfaces que
   const { manifest, board } = makeOS(t);
   board.addTask({ task: "Row", to: "claude" });
   const frame = renderTuiFrame({ manifest, tasks: board.listTasks(), notice: { text: "Spend $5?", choices: [{ label: "Yes" }, { label: "No" }] } });
-  assert.match(frame, /6:Cursor/);
-  assert.match(frame, /5:Antigravity/);
+  assert.match(frame, /5:Cursor/);
+  assert.match(frame, /4:Antigravity/);
+  assert.doesNotMatch(frame, /Gemini/);
   assert.match(frame, /WAITING ON YOU/);
   assert.match(frame, /\[1\] Yes/);
   const today = renderTuiFrame({ manifest, tasks: [], summary: { headline: "All quiet.", finished: [], waiting: [] } });
   assert.match(today, /All quiet\./);
   saveManifest(path.dirname(manifest.board.localDir), manifest);
   assert.equal(loadManifest(path.dirname(manifest.board.localDir)).roles.builder, "claude");
+  // A workspace saved when Gemini was an agent opens with Antigravity in its place.
+  saveManifest(path.dirname(manifest.board.localDir), { ...manifest, roles: { ...manifest.roles, researcher: "gemini" }, priorities: { researcher: ["gemini", "antigravity"] }, talkTo: { claude: "gemini" } });
+  const upgraded = loadManifest(path.dirname(manifest.board.localDir));
+  assert.deepEqual([upgraded.roles.researcher, upgraded.priorities.researcher, upgraded.talkTo.claude], ["antigravity", ["antigravity"], "antigravity"]);
 });

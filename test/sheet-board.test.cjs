@@ -53,7 +53,7 @@ function setup(t) {
   const manifest = {
     board: { mode: "local", localDir: dir },
     ideology: { routerFunnel: "Muse" },
-    roles: { orchestrator: "muse", builder: "claude", researcher: "gemini", auditor: "codex" },
+    roles: { orchestrator: "muse", builder: "claude", researcher: "antigravity", auditor: "codex" },
     settings: { autoAudit: false },
   };
   return { dir, board, manifest, notices: createNoticeBook({ dir }) };

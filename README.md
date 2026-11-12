@@ -2,7 +2,7 @@
 
 Say what you need. Your AI agents do the work, check each other, and reach you on your phone when they need you.
 
-It works with the ones you already have: Claude Code, Codex, Gemini, Antigravity, Cursor. One is enough.
+It works with the ones you already have: Claude Code, Codex, Antigravity, Cursor. One is enough.
 
 ## Get started
 

@@ -21,9 +21,9 @@ function setup(t) {
   const manifest = {
     board: { mode: "local", localDir: dir },
     ideology: { routerFunnel: "Muse" },
-    roles: { orchestrator: "muse", builder: "claude", researcher: "gemini", auditor: "codex" },
+    roles: { orchestrator: "muse", builder: "claude", researcher: "antigravity", auditor: "codex" },
   };
-  const availability = { claude: true, codex: true, gemini: true };
+  const availability = { claude: true, codex: true, antigravity: true };
   const queue = task => queueOrganizerRequest({ board, manifest, task });
   const run = (task, runner = async () => assert.fail("No agent run expected")) => dispatchBoardTask({
     workspaceRoot: dir, board, manifest, notices, availability, taskId: task.ID, runner,
@@ -47,7 +47,7 @@ test("a voice dump becomes separate board tasks, one owner each, and gated work 
   assert.equal(board.findTask(row.ID).Status, "Done");
   const [fix, research, send] = board.listTasks().slice(1);
   assert.deepEqual([fix.To, fix.Status, board.getMeta(fix.ID).kind], ["claude", "Open", "build"]);
-  assert.deepEqual([research.To, board.getMeta(research.ID).kind], ["gemini", "research"]);
+  assert.deepEqual([research.To, board.getMeta(research.ID).kind], ["antigravity", "research"]);
   assert.equal(board.getMeta(fix.ID).splitFrom, row.ID);
   // Sending to another person is never handed straight to a worker.
   assert.deepEqual([send.To, board.getMeta(send.ID).intent], ["muse", "external_action"]);
@@ -281,7 +281,11 @@ test("Antigravity receives a work-order path without user text in argv", async t
 
 test("read-only work selects the harness's explicit plan or ask mode", () => {
   const { findHarness } = require("../lib/harness-registry.cjs");
-  assert.deepEqual(findHarness("gemini").run.args({ mode: "read" }).slice(-2), ["--approval-mode", "plan"]);
+  const agy = findHarness("antigravity").run.args({ mode: "read", cwd: "C:\\work" });
+  assert.equal(agy[agy.indexOf("--mode") + 1], "plan");
+  // The Gemini command line is not an agent. Anything still assigned to it goes to Antigravity.
+  assert.equal(findHarness("gemini").id, "antigravity");
+  assert.equal(require("../lib/harness-registry.cjs").HARNESSES.some(h => h.id === "gemini"), false);
   assert.ok(findHarness("cursor").run.args({ mode: "read" }).includes("--mode=ask"));
   assert.ok(!findHarness("cursor").run.args({ mode: "read" }).includes("--force"));
 });

@@ -78,7 +78,7 @@ test("the board shows the live line while a task runs, and clears it when the ta
   const boardDir = path.join(dir, "board");
   const board = createLocalBoard({ boardDir, routerName: "Muse" });
   board.initBoard([], { empty: true });
-  const manifest = { board: { mode: "local", localDir: boardDir }, ideology: { routerFunnel: "Muse" }, roles: { orchestrator: "muse", builder: "claude", auditor: "codex", researcher: "gemini" }, settings: { autoAudit: false } };
+  const manifest = { board: { mode: "local", localDir: boardDir }, ideology: { routerFunnel: "Muse" }, roles: { orchestrator: "muse", builder: "claude", auditor: "codex", researcher: "antigravity" }, settings: { autoAudit: false } };
   const server = createDesktopServer({ workspaceRoot: dir, manifest, board, detect: () => [] });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   t.after(() => server.close());
