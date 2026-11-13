@@ -22,6 +22,15 @@ const { createCloudLink } = require("../lib/cloud-link.cjs");
 const { syncBoardSheet } = require("../lib/sheet-board.cjs");
 const { addVersionNote } = require("../lib/versions.cjs");
 
+/** A stand-in for the project tools. Its git init leaves a history behind, the way the real one does. */
+async function gitInit(tool, args, options = {}) {
+  if (tool === "git" && args[0] === "init" && options.cwd) {
+    fs.mkdirSync(path.join(options.cwd, ".git"), { recursive: true });
+    fs.writeFileSync(path.join(options.cwd, ".git", "HEAD"), "ref: refs/heads/main\n");
+  }
+  return { code: 0, stdout: "", stderr: "" };
+}
+
 function setup(t, settings = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "aios-loose-"));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
@@ -197,13 +206,18 @@ test("the browser fence keeps a job to one tab, one page and two nameservers, an
   // Nothing happens before the job has its own tab, and nothing is read or clicked before its page is open.
   assert.equal(at({}, "navigate", { url: home, tabId: 7 }).allow, false);
   assert.equal(at({}, "read_page", { tabId: 7 }).allow, false);
-  assert.equal(at({}, "tabs_context_mcp", {}).allow, true);
+  assert.equal(at({}, "tabs_context_mcp", { createIfEmpty: true }).allow, true);
   assert.equal(at({}, "tabs_create_mcp", {}).allow, true);
   assert.equal(at({ tab: "7" }, "tabs_create_mcp", {}).allow, false, "one tab per job");
   assert.equal(at({ tab: "7" }, "read_page", { tabId: 7 }).allow, false, "the page is not open yet");
   assert.equal(at({ tab: "7" }, "computer", { action: "left_click", coordinate: [1, 2], tabId: 7 }).allow, false);
   const opened = at({ tab: "7" }, "navigate", { url: home, tabId: 7 });
-  assert.deepEqual([opened.allow, opened.state], [true, { steps: 1, tab: "7", opened: true }]);
+  assert.deepEqual([opened.allow, opened.state], [true, { steps: 1, tab: "7", opened: true, looks: 0 }]);
+
+  // The tab list is read at most twice, and never once the job has its own tab.
+  assert.deepEqual(at({}, "tabs_context_mcp", {}).state.looks, 1);
+  assert.equal(at({ looks: 2 }, "tabs_context_mcp", {}).allow, false);
+  assert.match(at({ tab: "7" }, "tabs_context_mcp", {}).why, /does not need to list the others/);
   assert.equal(at({ tab: "7" }, "navigate", { url: "https://www.namecheap.com/shoppingcart/", tabId: 7 }).allow, false);
 
   // Every other tab is out of reach: reading it, clicking in it, sending it somewhere, or closing it.
@@ -247,7 +261,8 @@ test("the browser fence keeps a job to one tab, one page and two nameservers, an
   assert.equal(settings.hooks.PreToolUse[0].matcher, "mcp__claude-in-chrome__.*");
   assert.match(settings.hooks.PreToolUse[0].hooks[0].command, /browser-guard\.cjs" bakerysite\.co "/);
   assert.throws(() => guardSettings({ name: "x.co; rm -rf", counterFile: stateFile }), error => error.code === "BAD_NAME");
-  for (const bad of ["/tmp/$(touch x).json", "/tmp/`id`.json", "C:\\Users\\%USERNAME%\\g.json", 'C:\\a"b.json', "/tmp/a;b.json", "/tmp/a&b.json"]) {
+  assert.ok(guardSettings({ name, counterFile: "C:\\Users\\José Núñez\\AppData\\Local\\Temp\\g.json" }));
+  for (const bad of ["C:\\Users\\a!b\\g.json", "/tmp/a^b.json", "/tmp/a\nb.json", "/tmp/$(touch x).json", "/tmp/`id`.json", "C:\\Users\\%USERNAME%\\g.json", 'C:\\a"b.json', "/tmp/a;b.json", "/tmp/a&b.json"]) {
     assert.throws(() => guardSettings({ name, counterFile: bad }), error => error.code === "UNSAFE_COMMAND_LINE", bad);
   }
   const claude = findHarness("claude").browser;
@@ -459,7 +474,7 @@ test("the organizer keeps asking until the picture is clear, and stops when told
     if (asked < questions.length) return { status: "Waiting on User", result: "clarify", answer: "One more thing.", question: questions[asked++] };
     return { status: "Waiting on User", result: "delegate", answer: "Sending it to a builder.", delegation: { role: "builder", work: "Build the salon booking site as agreed", newProject: "salon-booking" } };
   };
-  const shipRun = async () => ({ code: 0, stdout: "", stderr: "" });
+  const shipRun = gitInit;
   for (const question of questions) {
     await go(row.ID, runner, { shipRun });
     const meta = board.getMeta(row.ID);
@@ -481,7 +496,7 @@ test("the organizer keeps asking until the picture is clear, and stops when told
 test("a voice dump with several new things gives each its own folder", async t => {
   const { board, manifest, go } = setup(t);
   const row = queueOrganizerRequest({ board, manifest, task: "Okay so first build a landing page for my lawn care business, and then also make a recipe app for my mom" });
-  const shipRun = async () => ({ code: 0, stdout: "", stderr: "" });
+  const shipRun = gitInit;
   await go(row.ID, async ({ mode }) => (mode === "read"
     ? { status: "Waiting on User", result: "tasks", answer: "Two new things.", split: [
       { role: "builder", work: "Build a landing page for the lawn care business", newProject: "lawn-care-site" },
@@ -697,7 +712,7 @@ test("what a person types or changes in the Sheet comes back to the board", asyn
 
 test("a new project never takes over a folder that is already there, and nothing is built without a folder", async t => {
   const { board, manifest, go } = setup(t);
-  const run = async () => ({ code: 0, stdout: "", stderr: "" });
+  const run = gitInit;
   // The owner already has a folder by that name. It is not adopted, initialised or pinned.
   const theirs = path.join(manifest.projectsHome, "tax-returns");
   fs.mkdirSync(theirs, { recursive: true });
@@ -708,6 +723,11 @@ test("a new project never takes over a folder that is already there, and nothing
   // A folder that could not be started is not left behind as a project.
   await assert.rejects(createProject({ manifest, name: "broken-start", run: async () => ({ code: 1, stdout: "", stderr: "" }) }), error => error.code === "PROJECT_NOT_STARTED");
   assert.equal(fs.existsSync(path.join(manifest.projectsHome, "broken-start")), false);
+  // Git failed but left a half-made .git folder behind: still not a project, and the folder is cleaned up.
+  const half = async (tool, args, options) => { fs.mkdirSync(path.join(options.cwd, ".git")); return { code: 128, stdout: "", stderr: "fatal" }; };
+  await assert.rejects(createProject({ manifest, name: "half-made", run: half }), error => error.code === "PROJECT_NOT_STARTED" && !error.gitMissing);
+  assert.equal(fs.existsSync(path.join(manifest.projectsHome, "half-made")), false);
+  await assert.rejects(createProject({ manifest, name: "no-git", run: async () => ({ code: 127, missing: true, stdout: "", stderr: "" }) }), error => error.gitMissing === true);
   // One this software made is reused when asked for again by the same name.
   const made = await createProject({ manifest, name: "bakery-site", run });
   assert.equal(await createProject({ manifest, name: "Bakery Site", run }), made);
@@ -807,17 +827,93 @@ test("a note that orders a send or a spend, from the Sheet or the phone, goes to
     { id: "r2", kind: "request", body: { text: `Note for ${build.ID}: make the header blue`, to: null } },
   ];
   let failNote = true;
+  const acked = [];
   const link = createCloudLink({
     relayUrl: "https://relay.example", homeToken: "home", board, notices, manifest, makeSheetTasks: () => ({ configured: false }),
     addNote: options => { if (failNote) { failNote = false; throw new Error("disk full"); } return addVersionNote(options); },
-    async fetchFn(url) { return new Response(JSON.stringify(new URL(url).pathname.endsWith("/pull") ? { items: queue, push: [] } : {})); },
+    async fetchFn(url, { body } = {}) {
+      const route = new URL(url).pathname.split("/").at(-1);
+      if (route === "ack") acked.push(...JSON.parse(body).ids);
+      return new Response(JSON.stringify(route === "pull" ? { items: queue, push: [] } : {}));
+    },
   });
   await link.tick();
   await link.tick();
   const held = board.listTasks().filter(row => row.Task === "then publish it to the app store");
   assert.equal(held.length, 1);
   assert.equal(board.getMeta(held[0].ID).intent, "external_action");
-  assert.deepEqual(board.getMeta(build.ID).ownerNotes || [], [], "the note that failed to save is not applied twice or turned into a second request");
-  assert.equal(board.listTasks().some(row => /make the header blue/.test(row.Task)), false);
-  assert.ok(notices.listAll().some(n => n.text === `I could not save your note for ${build.ID}. Send it again.`));
+  assert.deepEqual(board.getMeta(build.ID).ownerNotes, ["make the header blue"], "the note that failed to save is saved on the next pass, once");
+  assert.equal(board.listTasks().some(row => /make the header blue/.test(row.Task)), false, "and never turned into a second, ordinary request");
+  assert.deepEqual(acked, ["r1", "r1", "r2"], "the one that failed was not acknowledged until it was saved");
+});
+
+test("building work with nowhere to build is asked about, and a folder that cannot be made says why", async t => {
+  const { board, manifest, go } = setup(t);
+  const projects = [{ name: "bakery-site", path: path.join(manifest.projectsHome, "bakery-site"), repo: null }, { name: "salon-booking", path: path.join(manifest.projectsHome, "salon-booking"), repo: null }];
+  let builds = 0;
+  const builder = work => async ({ mode }) => {
+    if (mode !== "read") { builds++; return { status: "Done", answer: "Built." }; }
+    return { status: "Waiting on User", result: "delegate", answer: "Sending it.", delegation: { role: "builder", work } };
+  };
+  // No project named, none in the owner's words: the organizer asks which one, naming them.
+  const row = queueOrganizerRequest({ board, manifest, task: "Fix the broken checkout button so the total updates when the quantity changes" });
+  await go(row.ID, builder("Fix the checkout total"), { projects, shipRun: gitInit });
+  assert.equal(builds, 0, "nothing is built in this app's own folder");
+  assert.equal(board.getMeta(row.ID).answer, "Which project is this for: bakery-site, salon-booking? Or is it something new?");
+  assert.equal(board.getMeta(row.ID).awaitingReply, true);
+  // The owner's answer names it, and the work goes there.
+  replyToOrganizer({ taskId: row.ID, text: "The bakery-site one", turn: board.getMeta(row.ID).conversation.length, board, manifest });
+  const where = [];
+  await go(row.ID, async options => { if (options.mode !== "read") where.push(options.cwd); return builder("Fix the checkout total")(options); }, { projects, shipRun: gitInit });
+  assert.deepEqual(where, [projects[0].path]);
+
+  // In a voice dump, a building job with no project goes back to the organizer, not to a builder.
+  const dump = queueOrganizerRequest({ board, manifest, task: "First fix the checkout button and then also research what other bakeries charge for delivery" });
+  await go(dump.ID, async ({ mode }) => (mode === "read"
+    ? { status: "Waiting on User", result: "tasks", answer: "Two things.", split: [{ role: "builder", work: "Fix the checkout button" }, { role: "researcher", work: "Research bakery delivery prices" }] }
+    : assert.fail("nothing runs yet")), { projects, shipRun: gitInit });
+  const [fix, look] = board.getMeta(dump.ID).split.map(id => board.getMeta(id));
+  assert.equal(fix.musePhase, "organize");
+  assert.equal(look.kind, "research", "research needs no folder");
+
+  // Git is missing: the owner is told that, with a way to try again, not asked for another name.
+  const fresh = queueOrganizerRequest({ board, manifest, task: "Build a booking page for my dog grooming business so regular customers can pick a time, get a reminder the day before, and see their past visits" });
+  await go(fresh.ID, async ({ mode }) => (mode === "read"
+    ? { status: "Waiting on User", result: "delegate", answer: "New.", delegation: { role: "builder", work: "Build it", newProject: "dog-grooming" } }
+    : assert.fail("no folder, no build")), { projects, shipRun: async () => ({ code: 127, missing: true, stdout: "", stderr: "" }) });
+  assert.match(board.getMeta(fresh.ID).answer, /because Git is not on this computer\. Install Git from git-scm\.com, then choose Try again\./);
+  assert.notEqual(board.getMeta(fresh.ID).awaitingReply, true);
+});
+
+test("a line typed again in the Sheet after it was written over is taken again", async t => {
+  const { board, manifest } = setup(t);
+  const cells = [];
+  const call = async (tool, args) => {
+    if (tool === "get_spreadsheet_metadata") return { sheets: [{ properties: { sheetId: 7, title: "Tasks" } }] };
+    if (tool === "get_spreadsheet_range") return { values: cells.map(row => [...row]) };
+    for (const request of args.requests) request.updateCells.rows.forEach((row, offset) => { cells[request.updateCells.start.rowIndex + offset] = row.values.map(value => value.userEnteredValue.stringValue); });
+    return { ok: true };
+  };
+  const state = {};
+  let clock = 9000000;
+  const sync = () => syncBoardSheet({ call, boardId: "sheet1", board, state, manifest, queue: queueOrganizerRequest, addNote: addVersionNote, now: () => (clock += 61000), readBackMs: 60000 });
+  const build = board.addTask({ task: "Build the bakery site", to: "claude", from: "You", meta: { kind: "build", builder: "claude" } });
+  board.updateByColumnName({ taskId: build.ID, agent: "Muse", columns: { Status: "Done" } });
+  board.setMeta(build.ID, { audit: { state: "checking" } });
+  await sync();
+  const col = name => cells[0].indexOf(name);
+
+  cells.push(["", "Call the printer", "", "", "", "", "", "", "", ""]);
+  cells[1][col("Latest note")] = "Make the header blue";
+  await sync();
+  // The Sheet was rewritten: the typed line is now a numbered task, and the note cell shows the board's own note.
+  assert.equal(board.listTasks().filter(row => row.Task === "Call the printer").length, 1);
+  // The same words, typed again on the next empty line and over the note: both are new, and both are taken.
+  cells.push(["", "Call the printer", "", "", "", "", "", "", "", ""]);
+  cells[1][col("Latest note")] = "Make the header blue";
+  await sync();
+  assert.equal(board.listTasks().filter(row => row.Task === "Call the printer").length, 2);
+  assert.deepEqual(board.getMeta(build.ID).ownerNotes, ["Make the header blue", "Make the header blue"]);
+  // Nothing is left pending once the Sheet has been written.
+  assert.equal(board.listTasks().some(row => (board.getMeta(row.ID).sheetNotesPending || []).length || (board.getMeta(row.ID).sheetReceipt && board.getMeta(row.ID).sheetShown !== true)), false);
 });

@@ -25,8 +25,9 @@ function setup(t) {
   };
   const availability = { claude: true, codex: true, antigravity: true };
   const queue = task => queueOrganizerRequest({ board, manifest, task });
+  const projects = [{ name: "web-app", path: dir, repo: null }];
   const run = (task, runner = async () => assert.fail("No agent run expected")) => dispatchBoardTask({
-    workspaceRoot: dir, board, manifest, notices, availability, taskId: task.ID, runner,
+    workspaceRoot: dir, board, manifest, notices, availability, taskId: task.ID, runner, projects,
   });
   return { dir, board, notices, manifest, availability, queue, run };
 }
@@ -39,7 +40,7 @@ test("a voice dump becomes separate board tasks, one owner each, and gated work 
     assert.equal(mode, "read");
     assert.match(prompt, /"status":"tasks"/);
     return { status: "Waiting on User", result: "tasks", answer: "Three things, on the board now.", split: [
-      { role: "builder", work: "Fix the login bug on the site" },
+      { role: "builder", work: "Fix the login bug on the site", project: "web-app" },
       { role: "researcher", work: "Look up what competitors charge" },
       { role: "builder", work: "Email the landlord about the lease" },
     ] };
@@ -77,7 +78,7 @@ test("a temporary failure retries on its own, then asks only when it keeps faili
   let clock = 1000;
   let calls = 0;
   const down = async () => { calls++; throw Object.assign(new Error("Claude Code could not run: token is refreshing"), { code: "AGENT_UNAVAILABLE" }); };
-  const go = (runner, taskId) => dispatchBoardTask({ workspaceRoot: dir, board, manifest, notices, availability: { claude: true }, runner, now: () => clock, ...(taskId ? { taskId } : {}) });
+  const go = (runner, taskId) => dispatchBoardTask({ workspaceRoot: dir, board, manifest, notices, availability: { claude: true }, runner, now: () => clock, projects: [{ name: "web-app", path: dir, repo: null }], ...(taskId ? { taskId } : {}) });
 
   const first = await go(down, row.ID);
   assert.deepEqual([first.dispatched, first.reason, first.retryInMs], [false, "RETRY_SCHEDULED", 60000]);
@@ -92,7 +93,7 @@ test("a temporary failure retries on its own, then asks only when it keeps faili
 
   clock += 60001;
   const second = await go(async ({ mode }) => mode === "read"
-    ? { status: "Waiting on User", result: "delegate", answer: "Sending it to a builder.", delegation: { role: "builder", work: "Fix the login bug" } }
+    ? { status: "Waiting on User", result: "delegate", answer: "Sending it to a builder.", delegation: { role: "builder", work: "Fix the login bug", project: "web-app" } }
     : { status: "Done", answer: "Fixed." });
   assert.equal(second.status, "Done");
 
@@ -196,7 +197,7 @@ test("Muse clarifies, keeps the answer on one row, and hands clear coding to the
     roles.push([agent, mode]);
     assert.match(prompt, /sign-in button spins forever/);
     if (mode === "read") return { status: "Waiting on User", result: "delegate", answer: "I’ll send the fix to a builder.",
-      delegation: { role: "builder", work: "Fix the sign-in button and test it" } };
+      delegation: { role: "builder", work: "Fix the sign-in button and test it", project: "web-app" } };
     assert.match(prompt, /Fix the sign-in button and test it/);
     return { status: "Done", answer: "Fixed and verified with the login test." };
   });

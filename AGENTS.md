@@ -46,7 +46,8 @@ This repository is **AI-first OS** (`https://github.com/cimbolicproductions/ai-f
 5. **Public repo hygiene.** No secrets, `.env` files, personal IDs, or machine usernames. Test 4 scans the repo.
 6. Hard gates stay hard: no spending, external sends, or public submissions without the owner's explicit approval.
 7. **A test reaches nothing real.** Agent runs, sign-ins, installs, GitHub, Vercel, the keyring, the network and browser jobs all refuse to start under the test runner (`underTest()` in `lib/harness-registry.cjs`) unless the test passes its own stand-in. A new side effect gets the same guard.
-8. **Never take an agent's word for what a check can confirm.** The registry record decides a nameserver change; GitHub decides whether a repository is private before every push.
+8. **Building needs a project folder.** Work the organizer sends to a builder always names a project, or a new one that `createProject` really started (git said so and `.git/HEAD` exists). With neither, the organizer asks which project; a builder never runs in this app's own folder.
+9. **Never take an agent's word for what a check can confirm.** The registry record decides a nameserver change; GitHub decides whether a repository is private before every push.
 
 ## Verification
 

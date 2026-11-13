@@ -19,6 +19,10 @@ function fakeTools({ github = true, vercel = true, alias = false } = {}) {
   async function run(tool, args, options = {}) {
     calls.push({ tool, args, cwd: options.cwd || null });
     const line = `${tool} ${args.join(" ")}`;
+    if (line === "git init" && options.cwd) {
+      fs.mkdirSync(path.join(options.cwd, ".git"), { recursive: true });
+      fs.writeFileSync(path.join(options.cwd, ".git", "HEAD"), "ref: refs/heads/main\n");
+    }
     if (line === "git remote get-url origin") return { code: hasRemote ? 0 : 2, stdout: "", stderr: "" };
     if (line === "gh auth status") return { code: signIn.github ? 0 : 1, stdout: "", stderr: "" };
     if (line === "vercel whoami") return { code: signIn.vercel ? 0 : 1, stdout: "", stderr: "" };
