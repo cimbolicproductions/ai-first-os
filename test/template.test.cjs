@@ -366,7 +366,7 @@ test("6. the old product name is gone and the license is real", () => {
 });
 
 test("7. harness registry is open: Cursor slots in, sign-in states are honest, keys stay one move", t => {
-  assert.deepEqual(laneList().map(l => `${l.key}:${l.id}`), ["1:board", "2:claude", "3:codex", "4:antigravity", "5:cursor"]);
+  assert.deepEqual(laneList().map(l => `${l.key}:${l.id}`), ["1:board", "2:claude", "3:codex", "4:antigravity", "5:cursor", "6:opencode"]);
   for (const h of HARNESSES) {
     assert.ok(h.run && h.signIn && h.models.length && h.authFiles, `${h.id} is complete`);
   }
@@ -1123,7 +1123,7 @@ test("18. first run: three windows once, zero-config defaults, and the local app
 
   const view = await (await fetch(`${base}/api/state`)).json();
   assert.equal(view.tasks.length, 0, "lands on an empty board ready for a first task");
-  assert.deepEqual(view.lanes.map(l => l.key), ["1", "2", "3", "4", "5"]);
+  assert.deepEqual(view.lanes.map(l => l.key), ["1", "2", "3", "4", "5", "6"]);
 
   const added = await (await post("/api/task", { task: "First task" })).json();
   assert.equal(added.task.To, "claude");

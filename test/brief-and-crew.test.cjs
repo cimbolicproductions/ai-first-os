@@ -42,7 +42,8 @@ test("a thin build request gets one question first, then the answer shapes the w
   let builds = 0;
   const runner = async ({ mode, prompt }) => {
     if (mode === "read") {
-      assert.match(prompt, /what it is for, who will use it, and what finished looks like/);
+      assert.match(prompt, /what it is for, who will use it, what finished looks like/);
+      assert.match(prompt, /over as many messages as it takes/);
       return delegate("bakery-site");
     }
     builds++;

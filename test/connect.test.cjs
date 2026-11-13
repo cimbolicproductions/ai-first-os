@@ -65,9 +65,10 @@ test("a link that is never approved expires, a missing tool sends the owner to g
   assert.deepEqual(await startConnect("vercel", { spawnFn: slow.spawnFn, locate: () => "/bin/vercel", openUrl: () => {}, timeoutMs: 30 }), { ok: false, reason: "expired" });
   assert.equal(slow.started[0].child.killed, true, "the waiting sign-in is stopped, not left running");
 
+  // A missing tool is reported, with where it comes from. Nothing is opened: the app offers to add it instead.
   const opened = [];
-  assert.deepEqual(await startConnect("vercel", { locate: () => null, openUrl: url => opened.push(url) }), { ok: false, reason: "missing" });
-  assert.deepEqual(opened, ["https://vercel.com/docs/cli"]);
+  assert.deepEqual(await startConnect("vercel", { locate: () => null, openUrl: url => opened.push(url) }), { ok: false, reason: "missing", get: "https://vercel.com/docs/cli" });
+  assert.deepEqual(opened, []);
 
   // A sign-in that prints something else entirely never turns into a link.
   const odd = fakeSpawn({ lines: ["Visit https://vercel.com.evil.example/oauth/device?user_code=X"], signInCode: 1 });

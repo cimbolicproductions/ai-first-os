@@ -33,7 +33,7 @@ function setup(t) {
   return { notices, manifest, project: manifest.projects[0], tools, run };
 }
 
-const agent = { id: "claude", label: "Claude Code", path: "/bin/claude", browser: { tools: ["mcp__claude-in-chrome__navigate", "mcp__claude-in-chrome__find"], args: () => [] } };
+const agent = { id: "claude", label: "Claude Code", path: "/bin/claude", browser: { tools: ["mcp__claude-in-chrome__navigate", "mcp__claude-in-chrome__find"], needs: "Chrome open with the Claude extension", guarded: true, args: () => [] } };
 const bought = { type: "domain", step: "bought", project: "bakery-site", row: "P1", name: "bakerysite.co" };
 
 test("without Namecheap's API, an agent changes the nameservers in the owner's own Chrome, and the registry decides", async t => {
@@ -75,7 +75,7 @@ test("without Namecheap's API, an agent changes the nameservers in the owner's o
 test("the agent's word is never enough: an unchanged record, no browser, or no sign-in each end in one plain card", async t => {
   const cases = [
     { said: "done", expect: "Claude Code finished, but Namecheap's record for bakerysite.co still shows other nameservers." },
-    { said: "no_browser", expect: "Claude Code could not reach your Chrome to point bakerysite.co at bakery-site. Open Chrome with the Claude extension, then choose Try again." },
+    { said: "no_browser", expect: "Claude Code could not reach your Chrome to point bakerysite.co at bakery-site. It needs Chrome open with the Claude extension. Then choose Try again." },
     { said: "not_signed_in", expect: "Chrome is not signed in to Namecheap, so Claude Code stopped before changing anything." },
   ];
   for (const { said, expect } of cases) {
@@ -111,7 +111,7 @@ test("Try again on that card runs the browser job again", async t => {
 });
 
 test("browser jobs get browser tools only, never run during a test, and the job text never rides on the command line", async () => {
-  assert.deepEqual(HARNESSES.filter(h => h.browser).map(h => h.id), ["claude"]);
+  assert.deepEqual(HARNESSES.filter(h => h.browser).map(h => h.id), ["claude", "codex"]);
   const args = HARNESSES.find(h => h.id === "claude").browser.args();
   assert.ok(args.includes("--chrome"));
   const allowed = args[args.indexOf("--allowedTools") + 1].split(",");

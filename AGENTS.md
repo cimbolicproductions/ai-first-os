@@ -5,7 +5,9 @@ This repository is **AI-first OS** (`https://github.com/cimbolicproductions/ai-f
 ## File Map
 
 - `bin/aios.cjs` (`bin/fleet.cjs` alias): CLI entrypoint.
-- `lib/harness-registry.cjs`: The open harness list. One entry per agent: finding it, sign-in, running work, models, hotkey.
+- `lib/harness-registry.cjs`: The open harness list. One entry per agent: finding it, sign-in, running work, models, hotkey, and optionally `browser` (can work in the owner's own Chrome), `free` (no account needed), `install` (how the app adds it), `run.stream` (a live step stream) and `run.fallbackModels`. OpenCode is the free agent: it runs free models, DeepSeek first, picked from its own list.
+- `lib/browser-guard.cjs`: The fence around a browser job. Claude Code runs it as a hook before and after every browser step; a step outside "set two nameservers for one domain" is refused by this program (exit code 2), and landing on a cart or payment page stops the job. Agents whose browser steps cannot be checked (`browser.guarded: false`, Codex) are only used after the owner says yes once.
+- `lib/install.cjs`: Adds or updates a listed tool (an agent, or a service's sign-in tool) on the owner's press. Fixed package names only.
 - `lib/agent-auth.cjs`: Detects harnesses and sign-in state from the registry.
 - `lib/roles.cjs`: Default role slate, routing, substitution, audit pairing.
 - `lib/os-runtime.cjs`: Work orders, dispatch, report parsing, `answerNotice`, board watcher.
@@ -16,8 +18,8 @@ This repository is **AI-first OS** (`https://github.com/cimbolicproductions/ai-f
 - `lib/ship.cjs`: New project folders, saving a version, the private GitHub repository and the Vercel address (production deploys). Only for projects the OS created. Asks before anything leaves the computer.
 - `lib/domains.cjs`: A project's own web address. Finds free names (Namecheap API with prices when connected, the public RDAP registry record otherwise), opens Namecheap's checkout, watches for the purchase, then sets Vercel's nameservers (Namecheap's API when connected; otherwise a browser-capable agent, `browser` in `lib/harness-registry.cjs`, works headless in the owner's own signed-in Chrome with browser tools only) and attaches the name with `vercel domains add`. Success is decided by the RDAP registry record, never the agent's report. Never buys anything. The Namecheap key goes only to the keyring and only in request bodies. Browser jobs refuse to start under the test runner (`NODE_TEST_CONTEXT`).
 - `lib/qr.cjs`: Zero-dependency QR encoder (byte mode, level M, versions 1 to 40) for the phone link.
-- `lib/sheet-board.cjs`: Creates the owner's board Sheet and mirrors the local board into it. The local board stays the engine.
-- `lib/activity.cjs`: The short live line of what each working agent is doing. Kept beside the board, never in it.
+- `lib/sheet-board.cjs`: Creates the owner's board Sheet and mirrors the local board into it. The local board stays the engine. Once a minute it reads the Sheet back: a line typed at the bottom becomes a request, a Status set to Done or Open is applied, and a note on a finished build goes into its next version. The board wins whenever it has moved on.
+- `lib/activity.cjs`: The short live line of what each working agent is doing. Kept beside the board, never in it. Reads Claude Code's and Codex's step streams; other agents show their latest plain line.
 - `lib/project-brief.cjs`: One brief per project in the vault, written by the software as work lands.
 - `lib/projects.cjs`: Finds the owner's project folders and GitHub names so work runs in the right place without asking.
 - `lib/first-run.cjs`, `lib/first-run-page.cjs`: The three-window introduction.
@@ -43,6 +45,8 @@ This repository is **AI-first OS** (`https://github.com/cimbolicproductions/ai-f
 4. **User-facing words are plain.** No key formats, dashboards, or settings pages. A missing choice becomes a notice, not a failure.
 5. **Public repo hygiene.** No secrets, `.env` files, personal IDs, or machine usernames. Test 4 scans the repo.
 6. Hard gates stay hard: no spending, external sends, or public submissions without the owner's explicit approval.
+7. **A test reaches nothing real.** Agent runs, sign-ins, installs, GitHub, Vercel, the keyring, the network and browser jobs all refuse to start under the test runner (`underTest()` in `lib/harness-registry.cjs`) unless the test passes its own stand-in. A new side effect gets the same guard.
+8. **Never take an agent's word for what a check can confirm.** The registry record decides a nameserver change; GitHub decides whether a repository is private before every push.
 
 ## Verification
 

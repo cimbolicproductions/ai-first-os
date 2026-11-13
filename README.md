@@ -2,7 +2,7 @@
 
 Say what you need. Your AI agents do the work, check each other, and reach you on your phone when they need you.
 
-It works with the ones you already have: Claude Code, Codex, Antigravity, Cursor. One is enough.
+It works with the ones you already have: Claude Code, Codex, Antigravity, Cursor. One is enough. Have none? It can add a free one that needs no account.
 
 ## Get started
 
@@ -18,7 +18,7 @@ node bin/aios.cjs desktop
 
 **You talk. It organizes.** Type a request or tap **Voice dump** and say everything on your mind. Your organizer turns it into separate tasks on the board and gives each one to the right agent.
 
-**It asks before it builds.** If you say "build me a website," it first asks what it is for, who will use it, and what finished looks like. Then it goes to work.
+**It asks before it builds.** If you say "build me a website," it first asks what it is for, who will use it, and what finished looks like. It keeps asking, a few short questions at a time, until it has a clear picture of the best version of what you want. Say "go ahead" or "you decide" at any point and it stops asking, makes the remaining choices itself, and writes them down where you can see them.
 
 **You pick the crew.** Under the box, choose your organizer, your first and second coding agent, and your first and second research agent. If the first is busy or out, the second takes it.
 
@@ -32,21 +32,31 @@ node bin/aios.cjs desktop
 
 **It works in versions.** Version 1 shows up as soon as it is built. While it is being checked, tell it what you want changed. Your notes and the review are combined into one brief, and the same agent builds version 2. Leave **Don’t stop till it’s done** on and it keeps going until the review comes back clean. Turn it off and it shows you each review and waits for your word.
 
-**New ideas get a home.** Ask for something new and it makes a project folder for it, then builds there.
+**New ideas get a home.** Ask for something new and it makes a project folder for it, then builds there. Name several new things in one breath and each gets its own folder.
+
+**There is a free agent.** OpenCode runs free models, DeepSeek first, with no account and no key. It shows in the list like any other agent. If it is missing, or too old to work, one press on **Add** or **Update** gets it. Free models can be slower and have daily limits, and they run on someone else's computers, so do not give them secrets. It only ever picks a free model, and skips the ones whose makers say they may learn from what is sent.
 
 **It can take it to GitHub and the web.** When a version comes back clean it is saved. The first time, it asks whether to keep your projects on your GitHub as private repositories. For each project, it asks before putting it online with Vercel, because anyone with the link can open it. If GitHub or Vercel is not connected, one tap starts the sign-in: the approval page opens, the same link shows on your phone, and the work carries on by itself once you approve. It only ever does this for projects it created, never ones you already had.
 
 **It can give a project its own address.** After a project first goes online, it offers once to find it a web address. It checks which names close to the project's name are free (with first-year prices if Namecheap is connected) and lists up to three. Pick one and Namecheap's own checkout opens, on your computer or your phone. You pay there; the app never buys anything. Once the name is yours it notices on its own, points it at your site, and attaches it in Vercel. It does the pointing the quietest way it can. If Namecheap's API is connected, it uses that. If not, and Claude Code is signed in with the Claude extension in Chrome, Claude Code changes the two nameserver settings in the background, in your own Chrome where you are already signed in to Namecheap. It gets browser tools only and is told never to type a password or change anything else. Either way, the app checks the public registry record itself before it says the name is pointed. Only if neither can run do you see one card: try again, connect Namecheap's API, or the two settings to change by hand. Namecheap has no sign-in button for apps, so connecting its API means pasting your username and API key once on your computer, and allowing your computer's address, which the app shows you. The key is kept in your computer's keyring. Namecheap only turns API access on for accounts with 20 or more domains, a $50 balance, or $50 spent in the last two years.
 
-**It keeps going.** If an agent is signed out or at its limit, another one takes the task and the board says who. If nobody can take it right now, it waits a minute and tries again.
+**It keeps going.** If an agent is signed out or at its limit, another one takes the task and the board says who. If nobody can take it right now, it waits a minute and tries again. If your account cannot use the model an agent is set to, it switches to one that works.
+
+**It gets missing tools itself.** If the sign-in tool a service needs is not on your computer, the question has an **Add** button. It is fetched, the sign-in starts, and the waiting work carries on.
 
 **It uses what you already pay for.** Every run uses your subscription sign-ins. If a pay-per-use key is the only way forward, it asks first, once.
 
-**Your board can be a Google Sheet.** Say "put my board in a Google Sheet." It creates the Sheet in your own Google account and keeps it current: every task, who has it, its status, and the latest note. This uses a signed-in Codex with Google Drive connected.
+**Your board can be a Google Sheet.** Say "put my board in a Google Sheet." It creates the Sheet in your own Google account and keeps it current: every task, who has it, its status, and the latest note. A line you type at the bottom of the Sheet becomes a request, a Status you set to Done or Open is applied, and a note you write on a finished build goes into its next version. This uses a signed-in Codex with Google Drive connected.
 
 **It asks once.** If nobody is signed in, the question has a button that opens the sign-in, and the task starts on its own after. If a task needs a choice you have not made, it asks in plain words at that moment and remembers.
 
+**You can ask for an address any time.** Say "give the bakery site its own address" in the chat and the same step starts for that project.
+
+**Agents can work in your own Chrome.** Pointing a name you bought at your site is done in your own Chrome, where you are already signed in, so no password passes through this app. Claude Code does it inside a fence: this app checks every browser step before it runs, and refuses anything that is not that one domain's page, the two nameservers, or a plain click. Codex can do it too, through the Codex app and its Chrome extension. Codex's browser steps cannot be checked one by one, so the app asks you once before using it. Either way, the public record decides whether it worked, never the agent.
+
 **Your phone is the front door.** When something is waiting on you, the question has **Answer from your phone**. Tap it, sign in once, and point your phone's camera at the code that appears. You can also open it any time from **Phone**. Send requests from anywhere. Questions come back with one-tap answers. The phone shows honestly whether your computer is online, and requests wait for it if it is not.
+
+**Notes work from your phone.** An update about a finished build has **Add a note**. What you write goes into the next version, the same as a note typed on the computer.
 
 **Some things always ask first.** Any spending, anything sent to other people, any public submission, and any refund or billing change need your explicit yes, every time.
 
