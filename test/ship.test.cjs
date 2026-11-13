@@ -79,7 +79,11 @@ test("a new idea gets its own folder, and a clean version goes to GitHub and the
   const folder = path.join(dir, "projects", "bakery-site");
   assert.equal(fs.statSync(folder).isDirectory(), true);
   assert.deepEqual(manifest.projects, [{ name: "bakery-site", path: folder, repo: null, createdByOs: true }]);
-  assert.deepEqual(tools.calls[0], { tool: "git", args: ["init"], cwd: folder });
+  // Git starts the history in a staging folder beside it, and the whole history then moves in.
+  assert.deepEqual(tools.calls[0].args, ["init"]);
+  assert.match(path.basename(tools.calls[0].cwd), /^.aios-new-/);
+  assert.equal(fs.existsSync(path.join(folder, ".git", "HEAD")), true);
+  assert.equal(fs.existsSync(tools.calls[0].cwd), false, "the staging folder is gone");
   assert.equal(cwds.at(-1), folder);
   assert.equal(board.getMeta(row.ID).project, "bakery-site");
 

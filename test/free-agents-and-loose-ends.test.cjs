@@ -737,11 +737,19 @@ test("a new project never takes over a folder that is already there, and nothing
   await assert.rejects(createProject({ manifest, name: "half-made", run: half }), error => error.code === "PROJECT_NOT_STARTED" && !error.gitMissing);
   assert.equal(fs.existsSync(path.join(manifest.projectsHome, "half-made")), false);
   await assert.rejects(createProject({ manifest, name: "no-git", run: async () => ({ code: 127, missing: true, stdout: "", stderr: "" }) }), error => error.gitMissing === true);
-  // Something else puts a file in the new folder while git is failing: that file is never deleted.
-  const raced = async (tool, args, options) => { fs.writeFileSync(path.join(options.cwd, "theirs.txt"), "keep me"); fs.mkdirSync(path.join(options.cwd, ".git")); return { code: 128, stdout: "", stderr: "" }; };
+  // Something else puts files, even a .git folder, in the new project folder while git is failing: none of it is deleted.
+  const target = path.join(manifest.projectsHome, "raced");
+  const raced = async (tool, args, options) => {
+    fs.writeFileSync(path.join(target, "theirs.txt"), "keep me");
+    fs.mkdirSync(path.join(target, ".git"));
+    fs.mkdirSync(path.join(options.cwd, ".git"));
+    return { code: 128, stdout: "", stderr: "" };
+  };
   await assert.rejects(createProject({ manifest, name: "raced", run: raced }), error => error.code === "PROJECT_NOT_STARTED");
-  assert.equal(fs.readFileSync(path.join(manifest.projectsHome, "raced", "theirs.txt"), "utf8"), "keep me");
-  assert.equal(fs.existsSync(path.join(manifest.projectsHome, "raced", ".git")), false, "only git's own leftovers are removed");
+  assert.equal(fs.readFileSync(path.join(target, "theirs.txt"), "utf8"), "keep me");
+  assert.equal(fs.existsSync(path.join(target, ".git")), true, "their .git is theirs");
+  // Git runs in a staging folder of its own, and that is all that is cleaned up.
+  assert.deepEqual(fs.readdirSync(manifest.projectsHome).filter(entry => entry.startsWith(".aios-new-")), []);
   // One this software made is reused when asked for again by the same name.
   const made = await createProject({ manifest, name: "bakery-site", run });
   assert.equal(await createProject({ manifest, name: "Bakery Site", run }), made);
