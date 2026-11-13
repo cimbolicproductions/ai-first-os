@@ -37,6 +37,7 @@
   #msg { min-height:22px; color:var(--muted); font-size:15px; margin:10px 0 0; }
   h2 { font-size:13px; letter-spacing:.04em; text-transform:uppercase; color:var(--muted); font-weight:600; margin:32px 0 10px; }
   .notice { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:14px; margin-bottom:10px; overflow-wrap:anywhere; }
+  .sign-in { display:block; text-align:center; margin-top:12px; padding:13px 18px; border-radius:12px; background:var(--text); color:var(--bg); font-weight:600; text-decoration:none; }
   .choices { display:flex; gap:8px; margin-top:12px; flex-wrap:wrap; }
   .choices button { flex:1 1 40%; }
   #today { color:var(--muted); }
@@ -334,12 +335,29 @@
     catch { $("ask").focus(); say("Tap the microphone on your keyboard and talk."); }
   };
 
+  function signInLink(url) {
+    try {
+      const u = new URL(url);
+      return u.protocol === "https:" && ["vercel.com", "github.com", "cli.github.com"].includes(u.hostname) ? u.href : null;
+    } catch { return null; }
+  }
+
   function noticeCard(n) {
     const card = document.createElement("div");
     card.className = "notice";
     const p = document.createElement("p");
     p.textContent = n.text;
     card.append(p);
+    const link = signInLink(n.link);
+    if (link) {
+      const a = document.createElement("a");
+      a.href = link;
+      a.target = "_blank";
+      a.rel = "noopener noreferrer";
+      a.className = "sign-in";
+      a.textContent = "Open the sign-in page";
+      card.append(a);
+    }
     if (n.choices && n.choices.length) {
       const row = document.createElement("div");
       row.className = "choices";

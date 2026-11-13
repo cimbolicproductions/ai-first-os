@@ -34,7 +34,7 @@ node bin/aios.cjs desktop
 
 **New ideas get a home.** Ask for something new and it makes a project folder for it, then builds there.
 
-**It can take it to GitHub and the web.** When a version comes back clean it is saved. The first time, it asks whether to keep your projects on your GitHub as private repositories. For each project, it asks before putting it online with Vercel, because anyone with the link can open it. If GitHub or Vercel is not connected, the question has a button that opens the sign-in. It only ever does this for projects it created, never ones you already had.
+**It can take it to GitHub and the web.** When a version comes back clean it is saved. The first time, it asks whether to keep your projects on your GitHub as private repositories. For each project, it asks before putting it online with Vercel, because anyone with the link can open it. If GitHub or Vercel is not connected, one tap starts the sign-in: the approval page opens, the same link shows on your phone, and the work carries on by itself once you approve. It only ever does this for projects it created, never ones you already had.
 
 **It keeps going.** If an agent is signed out or at its limit, another one takes the task and the board says who. If nobody can take it right now, it waits a minute and tries again.
 

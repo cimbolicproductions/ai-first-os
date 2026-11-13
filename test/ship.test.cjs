@@ -14,13 +14,14 @@ const { slug, shipVersion } = require("../lib/ship.cjs");
 /** Stand-ins for git, GitHub and Vercel that record every call. Nothing real is touched. */
 function fakeTools({ github = true, vercel = true, alias = false } = {}) {
   const calls = [];
+  const signIn = { github, vercel };
   let hasRemote = false;
   async function run(tool, args, options = {}) {
     calls.push({ tool, args, cwd: options.cwd || null });
     const line = `${tool} ${args.join(" ")}`;
     if (line === "git remote get-url origin") return { code: hasRemote ? 0 : 2, stdout: "", stderr: "" };
-    if (line === "gh auth status") return { code: github ? 0 : 1, stdout: "", stderr: "" };
-    if (line === "vercel whoami") return { code: vercel ? 0 : 1, stdout: "", stderr: "" };
+    if (line === "gh auth status") return { code: signIn.github ? 0 : 1, stdout: "", stderr: "" };
+    if (line === "vercel whoami") return { code: signIn.vercel ? 0 : 1, stdout: "", stderr: "" };
     if (line.startsWith("gh repo create")) { hasRemote = true; return { code: 0, stdout: "", stderr: "" }; }
     if (line.startsWith("gh repo view")) return { code: 0, stdout: "https://github.com/owner/bakery-site\n", stderr: "" };
     if (line === "vercel deploy --yes") return {
@@ -29,7 +30,7 @@ function fakeTools({ github = true, vercel = true, alias = false } = {}) {
     };
     return { code: 0, stdout: "", stderr: "" };
   }
-  return { run, calls, lines: () => calls.map(call => `${call.tool} ${call.args.join(" ")}`) };
+  return { run, calls, signIn, lines: () => calls.map(call => `${call.tool} ${call.args.join(" ")}`) };
 }
 
 function setup(t, settings = {}) {
@@ -119,7 +120,7 @@ test("a project the owner already had is never pushed or put online by this", as
   assert.deepEqual(tools.calls, []);
 });
 
-test("when GitHub is not connected, the question opens the sign-in and then carries on", async t => {
+test("when GitHub is not connected, the sign-in happens in the app and the work carries on by itself", async t => {
   const { dir, board, manifest, notices } = setup(t, { ship: { github: "yes" } });
   const tools = fakeTools({ github: false });
   const folder = path.join(dir, "projects", "bakery-site");
@@ -130,11 +131,42 @@ test("when GitHub is not connected, the question opens the sign-in and then carr
   assert.equal((await shipVersion({ board, root: "P1", manifest, notices, run: tools.run })).needs, "github");
   const connect = notices.listOpen().find(n => n.then?.type === "connect");
   assert.deepEqual(connect.choices, [{ label: "Connect GitHub", value: "connect:github" }]);
-  const opened = [];
-  answerNotice({ noticeId: connect.id, value: "connect:github", notices, board, manifest, openConnect: service => { opened.push(service); return { ok: true }; } });
-  assert.deepEqual(opened, ["github"]);
-  const carryOn = notices.listOpen().find(n => /Once you are signed in to GitHub/.test(n.text));
-  assert.deepEqual(carryOn.choices.map(choice => choice.label), ["I'm signed in"]);
+  assert.match(connect.text, /You approve it in your browser/);
+
+  // A stand-in for the sign-in: it shows its page and code, then the owner approves.
+  let approve;
+  const started = [];
+  const answered = answerNotice({
+    noticeId: connect.id, value: "connect:github", notices, board, manifest, shipRun: tools.run,
+    connect: (service, { onPrompt }) => {
+      started.push(service);
+      onPrompt({ link: "https://github.com/login/device", code: "ABCD-1234" });
+      return new Promise(resolve => { approve = resolve; });
+    },
+  });
+  assert.deepEqual(started, ["github"]);
+  const prompt = notices.listOpen().find(n => n.kind === "connect");
+  assert.equal(prompt.link, "https://github.com/login/device");
+  assert.match(prompt.text, /enter the code ABCD-1234. This carries on by itself once you approve./);
+  assert.deepEqual(prompt.choices, [], "nothing to click but the link");
+
+  tools.signIn.github = true;
+  approve({ ok: true });
+  await answered.connecting;
+  assert.equal(notices.listOpen().some(n => n.kind === "connect"), false, "the link goes away once used");
+  assert.equal(notices.listOpen().some(n => n.text === "Connected to GitHub."), true);
+  assert.ok(tools.lines().includes("gh repo create bakery-site --private --source . --remote origin --push"), "and the push that was waiting happened");
+
+  // Not approved in time: one plain question to start it again.
+  board.setMeta("P1", { shippedVersion: null });
+  manifest.projects[0].repo = null;
+  tools.signIn.github = false;
+  await shipVersion({ board, root: "P1", manifest, notices, run: tools.run });
+  const again = notices.listOpen().find(n => n.then?.type === "connect");
+  const late = answerNotice({ noticeId: again.id, value: "connect:github", notices, board, manifest, shipRun: tools.run, connect: async () => ({ ok: false, reason: "expired" }) });
+  await late.connecting;
+  const retry = notices.listOpen().find(n => /was not approved in time/.test(n.text));
+  assert.deepEqual(retry.choices, [{ label: "Connect GitHub", value: "connect:github" }]);
 });
 
 test("the owner gets the short Vercel address when there is one, not the long one that can need a sign-in", async t => {
