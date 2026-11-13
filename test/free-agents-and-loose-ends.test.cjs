@@ -187,7 +187,7 @@ test("the free agent reads its own list of free models once, and a real agent ne
     error => error.code === "AGENT_UNAVAILABLE" && /do not run during tests/.test(error.message));
 });
 
-test("the browser fence keeps a job to one tab, one page and two nameservers, and refuses what it cannot read", () => {
+test("the browser fence keeps a job to one tab, one page and two nameservers, and refuses what it cannot read", async () => {
   const tool = name => "mcp__claude-in-chrome__" + name;
   const name = "bakerysite.co";
   const home = "https://ap.www.namecheap.com/domains/domaincontrolpanel/bakerysite.co/domain";
@@ -293,6 +293,15 @@ test("the browser fence keeps a job to one tab, one page and two nameservers, an
   assert.equal(hook("not json at all").status, 2);
   fs.writeFileSync(stateFile, "{broken", "utf8");
   assert.equal(before("read_page", { tabId: 4242 }).status, 2);
+  // Two checks at the same moment cannot both use the last look at the tab list.
+  fs.rmSync(stateFile, { force: true });
+  const looks = Array.from({ length: 6 }, () => require("node:child_process").spawn(process.execPath, [script, name, stateFile], { stdio: ["pipe", "ignore", "ignore"] }));
+  for (const child of looks) child.stdin.end(JSON.stringify({ hook_event_name: "PreToolUse", tool_name: tool("tabs_context_mcp"), tool_input: {} }));
+  const codes = [];
+  for (const child of looks) codes.push(await new Promise(resolve => child.on("close", resolve)));
+  assert.equal(codes.filter(code => code === 0).length, 2, "exactly two looks, however many arrive together");
+  assert.equal(fs.existsSync(stateFile + ".lock"), false);
+  fs.rmSync(stateFile, { force: true });
   assert.equal(spawnSync(process.execPath, [script, name], { input: JSON.stringify({ hook_event_name: "PreToolUse", tool_name: tool("tabs_context_mcp"), tool_input: {} }), encoding: "utf8" }).status, 2);
   fs.rmSync(stateFile, { force: true });
 });
@@ -728,6 +737,11 @@ test("a new project never takes over a folder that is already there, and nothing
   await assert.rejects(createProject({ manifest, name: "half-made", run: half }), error => error.code === "PROJECT_NOT_STARTED" && !error.gitMissing);
   assert.equal(fs.existsSync(path.join(manifest.projectsHome, "half-made")), false);
   await assert.rejects(createProject({ manifest, name: "no-git", run: async () => ({ code: 127, missing: true, stdout: "", stderr: "" }) }), error => error.gitMissing === true);
+  // Something else puts a file in the new folder while git is failing: that file is never deleted.
+  const raced = async (tool, args, options) => { fs.writeFileSync(path.join(options.cwd, "theirs.txt"), "keep me"); fs.mkdirSync(path.join(options.cwd, ".git")); return { code: 128, stdout: "", stderr: "" }; };
+  await assert.rejects(createProject({ manifest, name: "raced", run: raced }), error => error.code === "PROJECT_NOT_STARTED");
+  assert.equal(fs.readFileSync(path.join(manifest.projectsHome, "raced", "theirs.txt"), "utf8"), "keep me");
+  assert.equal(fs.existsSync(path.join(manifest.projectsHome, "raced", ".git")), false, "only git's own leftovers are removed");
   // One this software made is reused when asked for again by the same name.
   const made = await createProject({ manifest, name: "bakery-site", run });
   assert.equal(await createProject({ manifest, name: "Bakery Site", run }), made);
