@@ -36,6 +36,8 @@
   #editTask select { font:inherit; color:var(--text); background:var(--bg); border:1px solid var(--line); border-radius:8px; padding:8px; }
   #msg { min-height:22px; color:var(--muted); font-size:15px; margin:10px 0 0; }
   h2 { font-size:13px; letter-spacing:.04em; text-transform:uppercase; color:var(--muted); font-weight:600; margin:32px 0 10px; }
+  .note-open { margin-top:10px; }
+  .notice .note-box { min-height:64px; margin:10px 0 8px; background:var(--bg, transparent); }
   .notice { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:14px; margin-bottom:10px; overflow-wrap:anywhere; }
   .sign-in { display:block; text-align:center; margin-top:12px; padding:13px 18px; border-radius:12px; background:var(--text); color:var(--bg); font-weight:600; text-decoration:none; }
   .choices { display:flex; gap:8px; margin-top:12px; flex-wrap:wrap; }
@@ -113,6 +115,7 @@
   let vapidKey = null;
   let sending = false;
   let lastAsks = "";
+  let lastInfo = "";
   const answered = new Set();
   const pendingKey = "aios-sheet-request:" + backend;
   let sheetAvailable = false;
@@ -358,6 +361,39 @@
       a.textContent = typeof n.linkLabel === "string" && n.linkLabel ? n.linkLabel.slice(0, 40) : "Open the sign-in page";
       card.append(a);
     }
+    // An update about a piece of work can take a note for its next version.
+    if (!(n.choices && n.choices.length) && n.kind === "done" && /^P[1-9][0-9]{0,6}$/.test(String(n.row || ""))) {
+      const open = document.createElement("button");
+      open.className = "soft note-open";
+      open.textContent = "Add a note";
+      open.onclick = () => {
+        const box = document.createElement("textarea");
+        box.className = "note-box";
+        box.rows = 2;
+        box.maxLength = 3900;
+        box.placeholder = "What should change in the next version?";
+        const send = document.createElement("button");
+        send.textContent = "Send note";
+        send.onclick = async () => {
+          const words = box.value.trim();
+          if (!words) return;
+          send.disabled = true;
+          try {
+            await call("POST", "request", { text: "Note for " + n.row + ": " + words });
+            box.remove();
+            send.remove();
+            say("Note sent.");
+            refresh();
+          } catch (err) {
+            send.disabled = false;
+            say(err.message);
+          }
+        };
+        open.replaceWith(box, send);
+        box.focus();
+      };
+      card.append(open);
+    }
     if (n.choices && n.choices.length) {
       const row = document.createElement("div");
       row.className = "choices";
@@ -401,7 +437,9 @@
       const askKey = asks.map(n => n.id).join();
       if (askKey !== lastAsks) { lastAsks = askKey; $("waiting").replaceChildren(...asks.map(noticeCard)); }
       $("updatesWrap").hidden = !info.length;
-      $("updates").replaceChildren(...info.slice(-5).reverse().map(noticeCard));
+      // Left alone while a note is being written, so the box does not vanish mid-sentence.
+      const infoKey = info.slice(-5).map(n => n.id).join();
+      if (infoKey !== lastInfo && !document.querySelector(".note-box")) { lastInfo = infoKey; $("updates").replaceChildren(...info.slice(-5).reverse().map(noticeCard)); }
       $("today").textContent = s.summary ? s.summary.headline : "Nothing yet.";
       vapidKey = s.vapidKey;
       $("alerts").hidden = !vapidKey || !("PushManager" in window) || (window.Notification && Notification.permission === "granted");
