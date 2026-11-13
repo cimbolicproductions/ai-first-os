@@ -95,7 +95,7 @@ test("find, pick, buy on Namecheap's page, connect once, and the name points at 
   let polls = 0;
   // The owner pays on Namecheap between the app's second and third check.
   const sleep = async () => { polls++; if (polls === 2) owned.push("bakerysite.co"); await new Promise(r => setImmediate(r)); };
-  const deps = { fetchFn: net.fetchFn, readSecret: keyring.readSecret, storeSecret: keyring.storeSecret, run, openUrl: url => opened.push(url), pollMs: 1, watchMs: 60000, sleep };
+  const deps = { fetchFn: net.fetchFn, readSecret: keyring.readSecret, storeSecret: keyring.storeSecret, run, openUrl: url => opened.push(url), pollMs: 1, watchMs: 60000, sleep, browserAgent: () => null };
 
   // Asked once, after the site first goes online.
   const offer = offerDomain({ project, row: "P1", liveUrl: "https://bakery-site.vercel.app", notices, manifest });
@@ -113,7 +113,7 @@ test("find, pick, buy on Namecheap's page, connect once, and the name points at 
   const wait = notices.listOpen().find(n => n.then?.step === "bought");
   assert.equal(wait.link, opened[0]);
   assert.equal(wait.linkLabel, "Open Namecheap");
-  assert.match(wait.text, /You pay there\. This carries on by itself once it is yours\./);
+  assert.match(wait.text, /You pay there\. Once it is yours, this carries on by itself and points it at your site\./);
   assert.deepEqual(project.domain, { name: "bakerysite.co", state: "buying" });
 
   // The owner pays on Namecheap. The public registry record changes, and the app notices on its own.
@@ -159,7 +159,7 @@ test("once Namecheap is connected, a bought name is pointed with no questions, a
   manifest.settings.namecheap = { user: "owner" };
   const keyring = fakeKeyring({ [KEY_SECRET]: "b2".repeat(16) });
   const net = fakeNet({ owned: ["bakerysite.co"] });
-  const deps = { fetchFn: net.fetchFn, readSecret: keyring.readSecret, storeSecret: keyring.storeSecret, run, openUrl: () => {}, pollMs: 1, watchMs: 60000, sleep: async () => {} };
+  const deps = { fetchFn: net.fetchFn, readSecret: keyring.readSecret, storeSecret: keyring.storeSecret, run, openUrl: () => {}, pollMs: 1, watchMs: 60000, sleep: async () => {}, browserAgent: () => assert.fail("the API needs no browser") };
   project.domain = { name: "bakerysite.co", state: "buying" };
   const then = { type: "domain", step: "bought", project: "bakery-site", row: "P1", name: "bakerysite.co" };
   const [a, b] = await Promise.all([domainStep({ then, value: "bought", notices, manifest, deps }), domainStep({ then, value: "bought", notices, manifest, deps })]);
