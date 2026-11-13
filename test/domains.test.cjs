@@ -177,7 +177,12 @@ test("doing it by hand gives the two nameservers and the page to set them on", a
   assert.match(steps.text, /set Nameservers to Custom DNS, and enter ns1\.vercel-dns\.com and ns2\.vercel-dns\.com/);
   assert.equal(steps.link, "https://ap.www.namecheap.com/domains/list/");
   assert.deepEqual(tools.map(x => x.line), ["vercel domains add bakerysite.co bakery-site"]);
-  await domainStep({ then: steps.then, value: "done", notices, manifest, deps: { run } });
+  // Done is only believed once the public record shows the change.
+  const record = async url => {
+    if (url === "https://data.iana.org/rdap/dns.json") return new Response(JSON.stringify({ services: [[["co"], ["https://rdap.example/"]]] }));
+    return new Response(JSON.stringify({ nameservers: [{ ldhName: "ns1.vercel-dns.com" }, { ldhName: "ns2.vercel-dns.com" }] }));
+  };
+  await domainStep({ then: steps.then, value: "done", notices, manifest, deps: { run, fetchFn: record } });
   assert.deepEqual(project.domain, { name: "bakerysite.co", state: "pointed" });
 });
 

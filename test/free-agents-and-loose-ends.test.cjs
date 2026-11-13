@@ -14,9 +14,9 @@ const { detectInstalledAgents } = require("../lib/agent-auth.cjs");
 const { readCodexEvent, plainLine } = require("../lib/activity.cjs");
 const { answerNotice, defaultCliRunner, dispatchBoardTask, queueOrganizerRequest, replyToOrganizer, buildWorkOrderPrompt } = require("../lib/os-runtime.cjs");
 const { classifyOrganizerRequest, asksForDomain } = require("../lib/request-flow.cjs");
-const { checkStep, onMoneyPage, guardSettings, MAX_STEPS } = require("../lib/browser-guard.cjs");
+const { checkStep, onMoneyPage, createdTab, isJobPage, guardSettings, MAX_STEPS } = require("../lib/browser-guard.cjs");
 const { domainStep, browserWorkOrder } = require("../lib/domains.cjs");
-const { shipVersion, defaultRun } = require("../lib/ship.cjs");
+const { shipVersion, defaultRun, createProject } = require("../lib/ship.cjs");
 const { installTool, installable, installCommand } = require("../lib/install.cjs");
 const { createCloudLink } = require("../lib/cloud-link.cjs");
 const { syncBoardSheet } = require("../lib/sheet-board.cjs");
@@ -178,55 +178,108 @@ test("the free agent reads its own list of free models once, and a real agent ne
     error => error.code === "AGENT_UNAVAILABLE" && /do not run during tests/.test(error.message));
 });
 
-test("the browser fence refuses every step that is not part of setting two nameservers for one domain", () => {
+test("the browser fence keeps a job to one tab, one page and two nameservers, and refuses what it cannot read", () => {
   const tool = name => "mcp__claude-in-chrome__" + name;
-  const step = (name, input, steps = 0) => checkStep({ tool: tool(name), input, name: "bakerysite.co", steps });
+  const name = "bakerysite.co";
   const home = "https://ap.www.namecheap.com/domains/domaincontrolpanel/bakerysite.co/domain";
+  const at = (state, action, input) => checkStep({ tool: tool(action), input, name, state });
 
-  assert.equal(step("navigate", { url: home }).allow, true);
-  for (const url of ["https://www.namecheap.com/shoppingcart/", "https://ap.www.namecheap.com/domains/domaincontrolpanel/other.com/domain", home + ".evil.example/x", "https://evil.example/?" + home, "back"]) {
-    assert.equal(step("navigate", { url }).allow, false, url);
-  }
-  assert.equal(step("computer", { action: "type", text: "ns1.vercel-dns.com" }).allow, true);
-  assert.equal(step("form_input", { value: "NS2.VERCEL-DNS.COM." }).allow, true);
-  for (const text of ["4111 1111 1111 1111", "hunter2", "ns1.vercel-dns.com.evil.example", ""]) {
-    assert.equal(step("computer", { action: "type", text }).allow, false, text);
-    assert.equal(step("form_input", { value: text }).allow, false, text);
-  }
-  assert.equal(step("computer", { action: "left_click", coordinate: [1, 2] }).allow, true);
-  assert.equal(step("computer", { action: "key", text: "ctrl+a" }).allow, true);
-  for (const input of [{ action: "key", text: "ctrl+v" }, { action: "right_click" }, { action: "left_click_drag" }]) assert.equal(step("computer", input).allow, false);
-  for (const name of ["javascript_tool", "file_upload", "upload_image", "something_new"]) assert.equal(step(name, {}).allow, false, name);
-  assert.equal(step("read_page", {}).allow, true);
-  assert.equal(step("read_page", {}, MAX_STEPS).allow, false, "a job that wanders runs out of steps");
-  assert.equal(checkStep({ tool: tool("read_page"), input: {}, name: "not a domain" }).allow, false);
-  assert.equal(checkStep({ tool: "ToolSearch", input: {}, name: "bakerysite.co" }).allow, true);
+  // The one page, compared after the address is parsed. A crafted address that only starts the same is refused.
+  assert.equal(isJobPage(home, name), true);
+  for (const url of [
+    home + "/../../other.com/domain", "https://ap.www.namecheap.com/domains/domaincontrolpanel/other.com/../bakerysite.co/domain",
+    home + "?x=1", home + "#x", home + "/", home + ".evil.example/x", "https://evil.example/?" + home,
+    "https://user@ap.www.namecheap.com/domains/domaincontrolpanel/bakerysite.co/domain", "http://ap.www.namecheap.com/domains/domaincontrolpanel/bakerysite.co/domain",
+    "https://ap.www.namecheap.com:8443/domains/domaincontrolpanel/bakerysite.co/domain", "https://ap.www.namecheap.com/domains/domaincontrolpanel/other.com/domain",
+    "https://www.namecheap.com/shoppingcart/", "back", "",
+  ]) assert.equal(isJobPage(url, name), false, url);
 
-  // After a step: landing where money moves stops the whole job.
+  // Nothing happens before the job has its own tab, and nothing is read or clicked before its page is open.
+  assert.equal(at({}, "navigate", { url: home, tabId: 7 }).allow, false);
+  assert.equal(at({}, "read_page", { tabId: 7 }).allow, false);
+  assert.equal(at({}, "tabs_context_mcp", {}).allow, true);
+  assert.equal(at({}, "tabs_create_mcp", {}).allow, true);
+  assert.equal(at({ tab: "7" }, "tabs_create_mcp", {}).allow, false, "one tab per job");
+  assert.equal(at({ tab: "7" }, "read_page", { tabId: 7 }).allow, false, "the page is not open yet");
+  assert.equal(at({ tab: "7" }, "computer", { action: "left_click", coordinate: [1, 2], tabId: 7 }).allow, false);
+  const opened = at({ tab: "7" }, "navigate", { url: home, tabId: 7 });
+  assert.deepEqual([opened.allow, opened.state], [true, { steps: 1, tab: "7", opened: true }]);
+  assert.equal(at({ tab: "7" }, "navigate", { url: "https://www.namecheap.com/shoppingcart/", tabId: 7 }).allow, false);
+
+  // Every other tab is out of reach: reading it, clicking in it, sending it somewhere, or closing it.
+  const ready = { tab: "7", opened: true, steps: 3 };
+  for (const [action, input] of [["read_page", { tabId: 8 }], ["get_page_text", {}], ["find", { tabId: "8", query: "x" }],
+    ["computer", { action: "left_click", coordinate: [1, 2], tabId: 8 }], ["navigate", { url: home, tabId: 8 }], ["tabs_close_mcp", { tabId: 8 }], ["form_input", { value: "ns1.vercel-dns.com" }]]) {
+    assert.equal(at(ready, action, input).allow, false, action + " on another tab");
+  }
+  assert.equal(at(ready, "read_page", { tabId: 7 }).allow, true);
+  assert.equal(at(ready, "tabs_close_mcp", { tabId: 7 }).allow, true);
+
+  // In its tab: the two nameservers and plain clicks, and nothing else.
+  assert.equal(at(ready, "computer", { action: "type", text: "ns1.vercel-dns.com", tabId: 7 }).allow, true);
+  assert.equal(at(ready, "form_input", { value: "NS2.VERCEL-DNS.COM.", tabId: 7 }).allow, true);
+  for (const typedText of ["4111 1111 1111 1111", "hunter2", "ns1.vercel-dns.com.evil.example", ""]) {
+    assert.equal(at(ready, "computer", { action: "type", text: typedText, tabId: 7 }).allow, false, typedText);
+    assert.equal(at(ready, "form_input", { value: typedText, tabId: 7 }).allow, false, typedText);
+  }
+  assert.equal(at(ready, "computer", { action: "left_click", coordinate: [1, 2], tabId: 7 }).allow, true);
+  assert.equal(at(ready, "computer", { action: "key", text: "ctrl+a", tabId: 7 }).allow, true);
+  for (const input of [{ action: "key", text: "ctrl+v" }, { action: "right_click" }, { action: "left_click_drag" }, {}]) assert.equal(at(ready, "computer", { ...input, tabId: 7 }).allow, false);
+  for (const action of ["javascript_tool", "file_upload", "upload_image", "something_new"]) assert.equal(at(ready, action, { tabId: 7 }).allow, false, action);
+  assert.equal(at({ ...ready, steps: MAX_STEPS }, "read_page", { tabId: 7 }).allow, false, "a job that wanders runs out of steps");
+
+  // Fail closed: a tool that is not a browser tool, no tool at all, or no valid domain is refused, never waved through.
+  for (const odd of ["ToolSearch", "", undefined, "Bash"]) assert.equal(checkStep({ tool: odd, input: {}, name, state: ready }).allow, false, String(odd));
+  assert.equal(checkStep({ tool: tool("read_page"), input: { tabId: 7 }, name: "not a domain", state: ready }).allow, false);
+
+  // After a step: landing where money moves stops the whole job, and the tab a job opens is read from what came back.
   assert.equal(onMoneyPage({ tool: tool("computer"), response: [{ type: "text", text: "Clicked. Tab is now at https://www.namecheap.com/shoppingcart/checkout" }] }), true);
   assert.equal(onMoneyPage({ tool: tool("navigate"), response: "Navigated to " + home }), false);
   assert.equal(onMoneyPage({ tool: tool("read_page"), response: "link https://www.namecheap.com/cart/ Renew" }), false, "a link on a page is not a visit");
+  assert.equal(createdTab([{ type: "text", text: "Created new tab. Tab ID: 1203948571" }]), "1203948571");
+  assert.equal(createdTab({ tabId: 77123 }), "77123");
+  assert.equal(createdTab("nothing useful"), null);
 
-  // The settings Claude Code loads: this program, asked before and after every browser step.
-  const settings = guardSettings({ name: "bakerysite.co", counterFile: path.join(os.tmpdir(), "c.count") });
+  // The settings Claude Code loads. A path that could mean something to a shell is refused, not escaped.
+  const stateFile = path.join(os.tmpdir(), "aios-guard-test-" + process.pid + ".json");
+  const settings = guardSettings({ name, counterFile: stateFile });
   assert.deepEqual(Object.keys(settings.hooks), ["PreToolUse", "PostToolUse"]);
   assert.equal(settings.hooks.PreToolUse[0].matcher, "mcp__claude-in-chrome__.*");
   assert.match(settings.hooks.PreToolUse[0].hooks[0].command, /browser-guard\.cjs" bakerysite\.co "/);
-  assert.throws(() => guardSettings({ name: "x.co; rm -rf", counterFile: "c" }), error => error.code === "BAD_NAME");
+  assert.throws(() => guardSettings({ name: "x.co; rm -rf", counterFile: stateFile }), error => error.code === "BAD_NAME");
+  for (const bad of ["/tmp/$(touch x).json", "/tmp/`id`.json", "C:\\Users\\%USERNAME%\\g.json", 'C:\\a"b.json', "/tmp/a;b.json", "/tmp/a&b.json"]) {
+    assert.throws(() => guardSettings({ name, counterFile: bad }), error => error.code === "UNSAFE_COMMAND_LINE", bad);
+  }
   const claude = findHarness("claude").browser;
   assert.equal(claude.guarded, true);
   assert.deepEqual(claude.args({ settingsFile: "C:\\tmp\\g.json" }).slice(4, 6), ["--settings", "C:\\tmp\\g.json"]);
 
-  // Run as Claude Code runs it: exit code 2 blocks the step, and unreadable input is refused, not waved through.
+  // Run as Claude Code runs it, a whole job in order. Exit code 2 is the one that blocks a step.
   const script = path.join(__dirname, "..", "lib", "browser-guard.cjs");
-  const hook = input => spawnSync(process.execPath, [script, "bakerysite.co"], { input, encoding: "utf8" });
-  const blocked = hook(JSON.stringify({ hook_event_name: "PreToolUse", tool_name: tool("navigate"), tool_input: { url: "https://www.namecheap.com/cart" } }));
-  assert.equal(blocked.status, 2);
-  assert.match(blocked.stderr, /Only https:\/\/ap\.www\.namecheap\.com/);
-  assert.equal(hook(JSON.stringify({ hook_event_name: "PreToolUse", tool_name: tool("navigate"), tool_input: { url: home } })).status, 0);
+  fs.rmSync(stateFile, { force: true });
+  const hook = (event, file = stateFile) => spawnSync(process.execPath, [script, name, file], { input: typeof event === "string" ? event : JSON.stringify(event), encoding: "utf8" });
+  const before = (action, input) => hook({ hook_event_name: "PreToolUse", tool_name: tool(action), tool_input: input });
+  const after = (action, response) => hook({ hook_event_name: "PostToolUse", tool_name: tool(action), tool_response: response });
+  assert.equal(before("navigate", { url: home, tabId: 4242 }).status, 2, "no tab of its own yet");
+  assert.equal(before("tabs_create_mcp", {}).status, 0);
+  assert.equal(after("tabs_create_mcp", [{ type: "text", text: "Created new tab. Tab ID: 4242" }]).status, 0);
+  const wrongTab = before("navigate", { url: home, tabId: 9999 });
+  assert.equal(wrongTab.status, 2);
+  assert.match(wrongTab.stderr, /Work only in the tab this job opened \(tab 4242\)/);
+  const cart = before("navigate", { url: "https://www.namecheap.com/cart", tabId: 4242 });
+  assert.equal(cart.status, 2);
+  assert.match(cart.stderr, /Only https:\/\/ap\.www\.namecheap\.com/);
+  assert.equal(before("navigate", { url: home, tabId: 4242 }).status, 0);
+  assert.equal(before("computer", { action: "type", text: "ns1.vercel-dns.com", tabId: 4242 }).status, 0);
+  assert.equal(before("computer", { action: "type", text: "4111111111111111", tabId: 4242 }).status, 2);
+  assert.equal(JSON.parse(fs.readFileSync(stateFile, "utf8")).steps, 3, "only steps that were allowed are counted");
+  assert.equal(JSON.parse(after("navigate", "now at https://www.namecheap.com/checkout").stdout).continue, false);
+  // Unreadable input, a broken state file, or no state file at all: refused.
   assert.equal(hook("not json at all").status, 2);
-  const stopped = hook(JSON.stringify({ hook_event_name: "PostToolUse", tool_name: tool("navigate"), tool_response: "now at https://www.namecheap.com/checkout" }));
-  assert.equal(JSON.parse(stopped.stdout).continue, false);
+  fs.writeFileSync(stateFile, "{broken", "utf8");
+  assert.equal(before("read_page", { tabId: 4242 }).status, 2);
+  assert.equal(spawnSync(process.execPath, [script, name], { input: JSON.stringify({ hook_event_name: "PreToolUse", tool_name: tool("tabs_context_mcp"), tool_input: {} }), encoding: "utf8" }).status, 2);
+  fs.rmSync(stateFile, { force: true });
 });
 
 function fakeRegistry(nameservers = {}) {
@@ -282,13 +335,14 @@ test("Codex can do the browser job too, after the owner says yes once, and takes
   assert.match(ask.text, /Claude Code could not reach your Chrome\. Codex can point bakerysite\.co at bakery-site in your Chrome\./);
   assert.match(ask.text, /cannot check Codex's browser steps one by one/);
   assert.deepEqual(ask.choices.map(c => c.value), ["yes", "no"]);
+  assert.deepEqual(ask.then.skip, ["claude"], "who already failed is remembered on the question");
   assert.deepEqual(tools, []);
 
   // The owner's yes is remembered, the job runs again, and the registry decides.
   manifest.settings.browser = { codex: "yes" };
   const again = await domainStep({ then: ask.then, value: "yes", notices, manifest, deps });
   assert.deepEqual(again, { ok: true, name: "bakerysite.co" });
-  assert.deepEqual(jobs, ["claude", "claude", "codex"]);
+  assert.deepEqual(jobs, ["claude", "codex"], "Claude is not sent to try again first");
   assert.deepEqual(project.domain, { name: "bakerysite.co", state: "pointed" });
 
   // A no is a no: Codex is never run, and the owner gets the one card.
@@ -321,12 +375,19 @@ test("the registry is asked whatever the agent said, and a by-hand Done is check
   nameservers["bakerysite.co"] = VERCEL;
   assert.deepEqual(await domainStep({ then: check.then, value: "done", notices: hand.notices, manifest: hand.manifest, deps: hand.deps }), { ok: true, name: "bakerysite.co", verified: true });
 
-  // A registry that cannot be read is said plainly, not passed off as a check.
+  // A registry that cannot be reached is not a yes: nothing is marked, and the owner can check again.
   const blind = domainSetup(t, {});
   blind.deps.fetchFn = async () => { throw new Error("offline"); };
-  const taken = await domainStep({ then: done, value: "done", notices: blind.notices, manifest: blind.manifest, deps: blind.deps });
-  assert.equal(taken.verified, false);
-  assert.match(blind.notices.listOpen().at(-1).text, /I could not read its public record to confirm, so this is on your word/);
+  assert.deepEqual(await domainStep({ then: done, value: "done", notices: blind.notices, manifest: blind.manifest, deps: blind.deps }), { ok: false, reason: "unverified" });
+  assert.equal(blind.project.domain, undefined);
+  assert.match(blind.notices.listOpen().at(-1).text, /I could not reach the public record for bakerysite\.co just now, so I cannot confirm it yet\. Nothing is marked done\./);
+
+  // Only a name ending that has no public record anywhere is taken on the owner's word, and that is said.
+  const none = domainSetup(t, {});
+  const odd = { ...done, name: "bakery.xyz" };
+  const taken = await domainStep({ then: odd, value: "done", notices: none.notices, manifest: none.manifest, deps: none.deps });
+  assert.deepEqual(taken, { ok: true, name: "bakery.xyz", verified: false });
+  assert.match(none.notices.listOpen().at(-1).text, /Names ending in \.xyz have no public record I can check, so this is on your word/);
 });
 
 test("a test that forgets its stand-ins reaches nothing real: no network, no keyring, no GitHub, no Vercel, no installer", async t => {
@@ -632,4 +693,131 @@ test("what a person types or changes in the Sheet comes back to the board", asyn
   assert.equal(board.findTask(busy.ID).Status, "In progress");
   assert.equal(cells[4][col("Status")], "In progress", "the Sheet is put back to what is true");
   assert.match(buildWorkOrderPrompt({ ID: typed.ID, Task: typed.Task, To: "claude" }, manifest, { source: "sheet" }), /typed into the owner's Google Sheet, which other people may be able to edit/);
+});
+
+test("a new project never takes over a folder that is already there, and nothing is built without a folder", async t => {
+  const { board, manifest, go } = setup(t);
+  const run = async () => ({ code: 0, stdout: "", stderr: "" });
+  // The owner already has a folder by that name. It is not adopted, initialised or pinned.
+  const theirs = path.join(manifest.projectsHome, "tax-returns");
+  fs.mkdirSync(theirs, { recursive: true });
+  fs.writeFileSync(path.join(theirs, "2025.txt"), "private");
+  await assert.rejects(createProject({ manifest, name: "Tax Returns", run }), error => error.code === "PROJECT_EXISTS");
+  assert.equal(fs.existsSync(path.join(theirs, ".git")), false);
+  assert.equal(manifest.projects, undefined);
+  // A folder that could not be started is not left behind as a project.
+  await assert.rejects(createProject({ manifest, name: "broken-start", run: async () => ({ code: 1, stdout: "", stderr: "" }) }), error => error.code === "PROJECT_NOT_STARTED");
+  assert.equal(fs.existsSync(path.join(manifest.projectsHome, "broken-start")), false);
+  // One this software made is reused when asked for again by the same name.
+  const made = await createProject({ manifest, name: "bakery-site", run });
+  assert.equal(await createProject({ manifest, name: "Bakery Site", run }), made);
+
+  // The organizer names a folder that is taken: it asks, and no builder runs anywhere.
+  let builds = 0;
+  const row = queueOrganizerRequest({ board, manifest, task: "Build a tracker for my tax returns with a page per year and a summary of what is owed" });
+  await go(row.ID, async ({ mode }) => {
+    if (mode !== "read") { builds++; return { status: "Done", answer: "Built." }; }
+    return { status: "Waiting on User", result: "delegate", answer: "Sending it to a builder.", delegation: { role: "builder", work: "Build the tax tracker", newProject: "tax-returns" } };
+  }, { shipRun: run });
+  assert.equal(builds, 0);
+  const meta = board.getMeta(row.ID);
+  assert.equal(meta.awaitingReply, true);
+  assert.match(meta.answer, /I could not make a folder named tax-returns for this, because something with that name is already on this computer/);
+
+  // In a voice dump, the one whose folder could not be made goes back to the organizer; the other is built.
+  const dump = queueOrganizerRequest({ board, manifest, task: "First build a recipe app for my mom and then also make a tax returns tracker" });
+  await go(dump.ID, async ({ mode }) => (mode === "read"
+    ? { status: "Waiting on User", result: "tasks", answer: "Two things.", split: [
+      { role: "builder", work: "Make a recipe app for mom", newProject: "recipe-app" },
+      { role: "builder", work: "Make a tax returns tracker", newProject: "tax-returns" },
+    ] }
+    : { status: "Done", answer: "Built." }), { shipRun: run });
+  const [recipe, tax] = board.getMeta(dump.ID).split.map(id => board.getMeta(id));
+  assert.deepEqual([recipe.project, recipe.musePhase], ["recipe-app", "work"]);
+  assert.deepEqual([tax.project ?? null, tax.musePhase], [null, "organize"], "no folder means it is the organizer's to sort out, not a builder's");
+});
+
+test("a remote this software has no record of making is never pushed to, even a private one", async t => {
+  const { board, manifest, notices } = setup(t, { ship: { github: "yes" } });
+  const folder = path.join(manifest.projectsHome, "bakery-site");
+  fs.mkdirSync(path.join(folder, ".git"), { recursive: true });
+  manifest.projects = [{ name: "bakery-site", path: folder, repo: null, createdByOs: true, online: "no" }];
+  const row = board.addTask({ task: "Build the bakery site", to: "claude", from: "You", meta: { kind: "build", project: "bakery-site" } });
+  const lines = [];
+  let hasRemote = true;
+  const run = async (tool, args) => {
+    const line = `${tool} ${args.join(" ")}`;
+    lines.push(line);
+    if (line === "git remote get-url origin") return { code: hasRemote ? 0 : 2, stdout: "", stderr: "" };
+    if (line.startsWith("gh repo create")) hasRemote = true;
+    if (line === "gh repo view --json nameWithOwner,visibility") return { code: 0, stdout: JSON.stringify({ nameWithOwner: "owner/bakery-site", visibility: "PRIVATE" }), stderr: "" };
+    return { code: 0, stdout: "", stderr: "" };
+  };
+  const refused = await shipVersion({ board, root: row.ID, manifest, notices, run });
+  assert.deepEqual([refused.failed, refused.reason], ["github", "other_repo"]);
+  assert.equal(lines.some(line => line.startsWith("git push")), false);
+  assert.match(notices.listOpen().at(-1).text, /points at a GitHub repository \(owner\/bakery-site\) that is not the one I made for it/);
+
+  // Made by this software: its name is recorded from GitHub's own answer, so the next push can be checked against it.
+  hasRemote = false;
+  lines.length = 0;
+  const first = await shipVersion({ board, root: row.ID, manifest, notices, run });
+  assert.equal(first.repoUrl, "https://github.com/owner/bakery-site");
+  assert.equal(manifest.projects[0].repo, "owner/bakery-site");
+  assert.ok(lines.some(line => line.startsWith("gh repo create bakery-site --private")));
+});
+
+test("a note that orders a send or a spend, from the Sheet or the phone, goes to the organizer's gates and not to a builder", async t => {
+  const { board, manifest, notices } = setup(t);
+  const build = board.addTask({ task: "Build the bakery site", to: "claude", from: "You", meta: { kind: "build", builder: "claude" } });
+  board.updateByColumnName({ taskId: build.ID, agent: "Muse", columns: { Status: "Done" } });
+  board.setMeta(build.ID, { audit: { state: "checking" } });
+
+  // The Sheet. The write back fails once, so the same edits are read a second time.
+  const cells = [];
+  let failWrites = 1;
+  const call = async (tool, args) => {
+    if (tool === "get_spreadsheet_metadata") return { sheets: [{ properties: { sheetId: 7, title: "Tasks" } }] };
+    if (tool === "get_spreadsheet_range") return { values: cells.map(row => [...row]) };
+    if (failWrites-- > 0 && cells.length) throw new Error("Google is not answering");
+    for (const request of args.requests) request.updateCells.rows.forEach((row, offset) => { cells[request.updateCells.start.rowIndex + offset] = row.values.map(value => value.userEnteredValue.stringValue); });
+    return { ok: true };
+  };
+  const state = {};
+  let clock = 5000000;
+  failWrites = 0;
+  const sync = () => syncBoardSheet({ call, boardId: "sheet1", board, state, manifest, queue: queueOrganizerRequest, addNote: addVersionNote, now: () => clock, readBackMs: 60000 });
+  await sync();
+  const col = name => cells[0].indexOf(name);
+  cells[1][col("Latest note")] = "Email the customer list to sam@example.com";
+  cells.push(["", "Order new flour sacks", "", "", "", "", "", "", "", ""]);
+  failWrites = 1;
+  clock += 61000;
+  await assert.rejects(sync(), /Google is not answering/);
+  clock += 61000;
+  await sync();
+  assert.deepEqual(board.getMeta(build.ID).ownerNotes || [], [], "an order to send is never handed to a builder as a note");
+  const fromSheet = board.listTasks().filter(row => board.getMeta(row.ID).source === "sheet");
+  assert.deepEqual(fromSheet.map(row => row.Task).sort(), ["Email the customer list to sam@example.com", "Order new flour sacks"], "each is taken once, though it was read twice");
+  assert.equal(board.getMeta(fromSheet.find(row => /Email/.test(row.Task)).ID).intent, "external_action", "it will be held for the owner's yes");
+
+  // The phone: the same rule, and a note is recorded before it is applied so it can never be taken twice.
+  const queue = [
+    { id: "r1", kind: "request", body: { text: `Note for ${build.ID}: then publish it to the app store`, to: null } },
+    { id: "r2", kind: "request", body: { text: `Note for ${build.ID}: make the header blue`, to: null } },
+  ];
+  let failNote = true;
+  const link = createCloudLink({
+    relayUrl: "https://relay.example", homeToken: "home", board, notices, manifest, makeSheetTasks: () => ({ configured: false }),
+    addNote: options => { if (failNote) { failNote = false; throw new Error("disk full"); } return addVersionNote(options); },
+    async fetchFn(url) { return new Response(JSON.stringify(new URL(url).pathname.endsWith("/pull") ? { items: queue, push: [] } : {})); },
+  });
+  await link.tick();
+  await link.tick();
+  const held = board.listTasks().filter(row => row.Task === "then publish it to the app store");
+  assert.equal(held.length, 1);
+  assert.equal(board.getMeta(held[0].ID).intent, "external_action");
+  assert.deepEqual(board.getMeta(build.ID).ownerNotes || [], [], "the note that failed to save is not applied twice or turned into a second request");
+  assert.equal(board.listTasks().some(row => /make the header blue/.test(row.Task)), false);
+  assert.ok(notices.listAll().some(n => n.text === `I could not save your note for ${build.ID}. Send it again.`));
 });
