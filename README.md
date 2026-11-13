@@ -36,6 +36,8 @@ node bin/aios.cjs desktop
 
 **It can take it to GitHub and the web.** When a version comes back clean it is saved. The first time, it asks whether to keep your projects on your GitHub as private repositories. For each project, it asks before putting it online with Vercel, because anyone with the link can open it. If GitHub or Vercel is not connected, one tap starts the sign-in: the approval page opens, the same link shows on your phone, and the work carries on by itself once you approve. It only ever does this for projects it created, never ones you already had.
 
+**It can give a project its own address.** After a project first goes online, it offers once to find it a web address. It checks which names close to the project's name are free (with first-year prices if Namecheap is connected) and lists up to three. Pick one and Namecheap's own checkout opens, on your computer or your phone. You pay there; the app never buys anything. Once the name is yours it notices on its own and points it at your site through Namecheap's API. That needs Namecheap connected once: Namecheap has no sign-in button for apps, so you paste your username and API key into the app on your computer, and allow your computer's address, which the app shows you. The key is kept in your computer's keyring. Namecheap only turns API access on for accounts with 20 or more domains, a $50 balance, or $50 spent in the last two years. Without it, the app tells you the two settings to change by hand.
+
 **It keeps going.** If an agent is signed out or at its limit, another one takes the task and the board says who. If nobody can take it right now, it waits a minute and tries again.
 
 **It uses what you already pay for.** Every run uses your subscription sign-ins. If a pay-per-use key is the only way forward, it asks first, once.
@@ -44,7 +46,7 @@ node bin/aios.cjs desktop
 
 **It asks once.** If nobody is signed in, the question has a button that opens the sign-in, and the task starts on its own after. If a task needs a choice you have not made, it asks in plain words at that moment and remembers.
 
-**Your phone is the front door.** Choose **Use your phone**, sign in, and open your private link. Send requests from anywhere. Questions come back with one-tap answers. The phone shows honestly whether your computer is online, and requests wait for it if it is not.
+**Your phone is the front door.** When something is waiting on you, the question has **Answer from your phone**. Tap it, sign in once, and point your phone's camera at the code that appears. You can also open it any time from **Phone**. Send requests from anywhere. Questions come back with one-tap answers. The phone shows honestly whether your computer is online, and requests wait for it if it is not.
 
 **Some things always ask first.** Any spending, anything sent to other people, any public submission, and any refund or billing change need your explicit yes, every time.
 

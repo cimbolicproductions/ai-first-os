@@ -24,7 +24,7 @@ function fakeTools({ github = true, vercel = true, alias = false } = {}) {
     if (line === "vercel whoami") return { code: signIn.vercel ? 0 : 1, stdout: "", stderr: "" };
     if (line.startsWith("gh repo create")) { hasRemote = true; return { code: 0, stdout: "", stderr: "" }; }
     if (line.startsWith("gh repo view")) return { code: 0, stdout: "https://github.com/owner/bakery-site\n", stderr: "" };
-    if (line === "vercel deploy --yes") return {
+    if (line === "vercel deploy --prod --yes") return {
       code: 0, stdout: "https://bakery-site-abc123.vercel.app\n",
       stderr: "Inspect: https://vercel.com/x [2s]\nProduction: https://bakery-site-abc123.vercel.app [9s]\n" + (alias ? "Aliased: https://bakery-site.vercel.app [9s]\n" : ""),
     };
@@ -96,7 +96,7 @@ test("a new idea gets its own folder, and a clean version goes to GitHub and the
   assert.equal(manifest.projects[0].repo, "owner/bakery-site");
 
   // Going online is asked for this project by name, because anyone with the link can open it.
-  assert.equal(tools.lines().includes("vercel deploy --yes"), false);
+  assert.equal(tools.lines().includes("vercel deploy --prod --yes"), false);
   const askOnline = notices.listOpen().find(n => n.then?.type === "online");
   assert.match(askOnline.text, /Put bakery-site online .* anyone who has the link can open it\./);
   const online = answerNotice({ noticeId: askOnline.id, value: "yes", notices, board, manifest, shipRun: tools.run });
@@ -104,6 +104,12 @@ test("a new idea gets its own folder, and a clean version goes to GitHub and the
   assert.equal(manifest.projects[0].online, "yes");
   assert.equal(notices.listOpen().some(n => n.text === "Version 1 of bakery-site is online. https://bakery-site-abc123.vercel.app"), true);
   assert.equal(board.getMeta(row.ID).liveUrl, "https://bakery-site-abc123.vercel.app");
+
+  // Once it is online, one offer of its own address. Asked once per project.
+  const offer = notices.listOpen().find(n => n.then?.type === "domain");
+  assert.match(offer.text, /Give bakery-site its own web address, instead of bakery-site-abc123\.vercel\.app\? .*Nothing is bought unless you buy it yourself\./);
+  assert.deepEqual(offer.choices.map(c => c.value), ["find", "no"]);
+  assert.equal(manifest.projects[0].domain, "offered");
 
   // Nothing the owner or an agent wrote ever reached a command line.
   const everyArgument = tools.calls.flatMap(call => call.args).join(" ");

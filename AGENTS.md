@@ -13,7 +13,9 @@ This repository is **AI-first OS** (`https://github.com/cimbolicproductions/ai-f
 - `lib/audit-loop.cjs`: The Audit action and findings-to-fix-tasks loop.
 - `lib/versions.cjs`: Versions of a build. Owner notes and review findings are combined into one brief for the next version.
 - `lib/connect.cjs`: Service sign-ins run in the background; the approval link shows in the app and on the phone, and waiting work resumes when approved.
-- `lib/ship.cjs`: New project folders, saving a version, the private GitHub repository and the Vercel address. Only for projects the OS created. Asks before anything leaves the computer.
+- `lib/ship.cjs`: New project folders, saving a version, the private GitHub repository and the Vercel address (production deploys). Only for projects the OS created. Asks before anything leaves the computer.
+- `lib/domains.cjs`: A project's own web address. Finds free names (Namecheap API with prices when connected, the public RDAP registry record otherwise), opens Namecheap's checkout, watches for the purchase, then sets Vercel's nameservers through Namecheap's API and attaches the name with `vercel domains add`. Never buys anything. The Namecheap key goes only to the keyring and only in request bodies.
+- `lib/qr.cjs`: Zero-dependency QR encoder (byte mode, level M, versions 1 to 40) for the phone link.
 - `lib/sheet-board.cjs`: Creates the owner's board Sheet and mirrors the local board into it. The local board stays the engine.
 - `lib/activity.cjs`: The short live line of what each working agent is doing. Kept beside the board, never in it.
 - `lib/project-brief.cjs`: One brief per project in the vault, written by the software as work lands.
