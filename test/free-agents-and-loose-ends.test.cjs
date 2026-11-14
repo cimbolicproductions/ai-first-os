@@ -14,7 +14,7 @@ const { detectInstalledAgents } = require("../lib/agent-auth.cjs");
 const { readCodexEvent, plainLine } = require("../lib/activity.cjs");
 const { answerNotice, defaultCliRunner, dispatchBoardTask, queueOrganizerRequest, replyToOrganizer, buildWorkOrderPrompt } = require("../lib/os-runtime.cjs");
 const { classifyOrganizerRequest, asksForDomain } = require("../lib/request-flow.cjs");
-const { checkStep, onMoneyPage, createdTab, isJobPage, guardSettings, MAX_STEPS } = require("../lib/browser-guard.cjs");
+const { checkStep, afterStep, tabAddress, onMoneyPage, createdTab, isJobPage, guardSettings, MAX_STEPS } = require("../lib/browser-guard.cjs");
 const { domainStep, browserWorkOrder } = require("../lib/domains.cjs");
 const { shipVersion, defaultRun, createProject } = require("../lib/ship.cjs");
 const { installTool, installable, installCommand } = require("../lib/install.cjs");
@@ -212,7 +212,10 @@ test("the browser fence keeps a job to one tab, one page and two nameservers, an
   assert.equal(at({ tab: "7" }, "read_page", { tabId: 7 }).allow, false, "the page is not open yet");
   assert.equal(at({ tab: "7" }, "computer", { action: "left_click", coordinate: [1, 2], tabId: 7 }).allow, false);
   const opened = at({ tab: "7" }, "navigate", { url: home, tabId: 7 });
-  assert.deepEqual([opened.allow, opened.state], [true, { steps: 1, tab: "7", opened: true, looks: 0 }]);
+  assert.deepEqual([opened.allow, opened.state], [true, { steps: 1, tab: "7", opened: true, looks: 0, looked: false, away: null }]);
+  // Right after a navigation nothing is clicked or typed until the job has looked at where it landed.
+  assert.match(at({ tab: "7", opened: true }, "computer", { action: "left_click", coordinate: [1, 2], tabId: 7 }).why, /Look at the page first/);
+  assert.equal(at({ tab: "7", opened: true }, "computer", { action: "screenshot", tabId: 7 }).allow, true);
 
   // The tab list is read at most twice, and never once the job has its own tab.
   assert.deepEqual(at({}, "tabs_context_mcp", {}).state.looks, 1);
@@ -221,7 +224,7 @@ test("the browser fence keeps a job to one tab, one page and two nameservers, an
   assert.equal(at({ tab: "7" }, "navigate", { url: "https://www.namecheap.com/shoppingcart/", tabId: 7 }).allow, false);
 
   // Every other tab is out of reach: reading it, clicking in it, sending it somewhere, or closing it.
-  const ready = { tab: "7", opened: true, steps: 3 };
+  const ready = { tab: "7", opened: true, steps: 3, looked: true };
   for (const [action, input] of [["read_page", { tabId: 8 }], ["get_page_text", {}], ["find", { tabId: "8", query: "x" }],
     ["computer", { action: "left_click", coordinate: [1, 2], tabId: 8 }], ["navigate", { url: home, tabId: 8 }], ["tabs_close_mcp", { tabId: 8 }], ["form_input", { value: "ns1.vercel-dns.com" }]]) {
     assert.equal(at(ready, action, input).allow, false, action + " on another tab");
@@ -274,7 +277,7 @@ test("the browser fence keeps a job to one tab, one page and two nameservers, an
   fs.rmSync(stateFile, { force: true });
   const hook = (event, file = stateFile) => spawnSync(process.execPath, [script, name, file], { input: typeof event === "string" ? event : JSON.stringify(event), encoding: "utf8" });
   const before = (action, input) => hook({ hook_event_name: "PreToolUse", tool_name: tool(action), tool_input: input });
-  const after = (action, response) => hook({ hook_event_name: "PostToolUse", tool_name: tool(action), tool_response: response });
+  const after = (action, response, input = {}) => hook({ hook_event_name: "PostToolUse", tool_name: tool(action), tool_input: input, tool_response: response });
   assert.equal(before("navigate", { url: home, tabId: 4242 }).status, 2, "no tab of its own yet");
   assert.equal(before("tabs_create_mcp", {}).status, 0);
   assert.equal(after("tabs_create_mcp", [{ type: "text", text: "Created new tab. Tab ID: 4242" }]).status, 0);
@@ -285,9 +288,21 @@ test("the browser fence keeps a job to one tab, one page and two nameservers, an
   assert.equal(cart.status, 2);
   assert.match(cart.stderr, /Only https:\/\/ap\.www\.namecheap\.com/);
   assert.equal(before("navigate", { url: home, tabId: 4242 }).status, 0);
+  assert.equal(before("computer", { action: "type", text: "ns1.vercel-dns.com", tabId: 4242 }).status, 2, "not before a look");
+  const context = address => [{ type: "text", text: "Successfully captured screenshot" }, { type: "text", text: `\n\nTab Context:\n- Executed on tabId: 4242\n- Available tabs:\n  • tabId 1111: "Cart" ("https://www.namecheap.com/shoppingcart/")\n  • tabId 4242: "Page" ("${address}")` }];
+  assert.equal(before("computer", { action: "screenshot", tabId: 4242 }).status, 0);
+  assert.equal(after("computer", context(home), { action: "screenshot", tabId: 4242 }).stdout, "", "another tab on a cart does not stop this job");
   assert.equal(before("computer", { action: "type", text: "ns1.vercel-dns.com", tabId: 4242 }).status, 0);
   assert.equal(before("computer", { action: "type", text: "4111111111111111", tabId: 4242 }).status, 2);
-  assert.equal(JSON.parse(fs.readFileSync(stateFile, "utf8")).steps, 3, "only steps that were allowed are counted");
+  // Chrome reports the tab now on the login page: looking and closing only.
+  assert.equal(before("computer", { action: "screenshot", tabId: 4242 }).status, 0);
+  after("computer", context("https://www.namecheap.com/myaccount/login/?ReturnUrl=%2fdomains"), { action: "screenshot", tabId: 4242 });
+  const login = before("computer", { action: "left_click", coordinate: [5, 5], tabId: 4242 });
+  assert.equal(login.status, 2);
+  assert.match(login.stderr, /left the domain's page and is now on www\.namecheap\.com\. You may look, or close the tab, but not click or type here/);
+  assert.equal(before("get_page_text", { tabId: 4242 }).status, 0);
+  assert.deepEqual(JSON.parse(fs.readFileSync(stateFile, "utf8")), { steps: 6, tab: "4242", opened: true, looks: 0, looked: true, away: "www.namecheap.com" }, "only steps that were allowed are counted");
+  assert.equal(JSON.parse(after("computer", context("https://www.namecheap.com/checkout/")).stdout).continue, false, "the job's own tab on a checkout stops the job");
   assert.equal(JSON.parse(after("navigate", "now at https://www.namecheap.com/checkout").stdout).continue, false);
   // Unreadable input, a broken state file, or no state file at all: refused.
   assert.equal(hook("not json at all").status, 2);
@@ -304,6 +319,26 @@ test("the browser fence keeps a job to one tab, one page and two nameservers, an
   fs.rmSync(stateFile, { force: true });
   assert.equal(spawnSync(process.execPath, [script, name], { input: JSON.stringify({ hook_event_name: "PreToolUse", tool_name: tool("tabs_context_mcp"), tool_input: {} }), encoding: "utf8" }).status, 2);
   fs.rmSync(stateFile, { force: true });
+});
+
+test("the fence reads where the tab really is from Chrome's own replies, as recorded live", () => {
+  // Recorded 2026-11-13 from a real headless Claude Code run in real Chrome, with the fence on.
+  const name = "aios-fence-check-7q2x.com";
+  const home = `https://ap.www.namecheap.com/domains/domaincontrolpanel/${name}/domain`;
+  const reminder = { type: "text", text: "<system-reminder>You used a single tool call this turn. Prefer browser_batch.</system-reminder>" };
+  const created = [{ type: "text", text: "Created new tab. Tab ID: 1258425714" }, { type: "text", text: '\n\nTab Context:\n- Executed on tabId: 1258425714\n- Available tabs:\n  • tabId 1258425713: "New Tab" ("chrome://newtab/")\n  • tabId 1258425714: "New Tab" ("chrome://newtab/")' }, reminder];
+  const navigated = [{ type: "text", text: `Navigated to ${home}` }, { type: "text", text: `\n\nTab Context:\n- Executed on tabId: 1258425714\n- Available tabs:\n  • tabId 1258425713: "New Tab" ("chrome://newtab/")\n  • tabId 1258425714: "${home}" ("${home}")` }, reminder];
+  const shot = [{ type: "text", text: "Successfully captured screenshot (1536x742, jpeg) - ID: ss_1814tad6b" }, { type: "text", text: `\n\nTab Context:\n- Executed on tabId: 1258425714\n- Available tabs:\n  • tabId 1258425713: "New Tab" ("chrome://newtab/")\n  • tabId 1258425714: "Namecheap.com • Login" ("https://www.namecheap.com/myaccount/login/?ReturnUrl=%2fdomains%2fdomaincontrolpanel%2f${name}%2fdomain")` }, { type: "image", source: { type: "base64", media_type: "image/jpeg", data: "x".repeat(300) } }];
+  const tool = action => "mcp__claude-in-chrome__" + action;
+
+  assert.equal(createdTab(created), "1258425714");
+  assert.equal(tabAddress(created, "1258425714"), "chrome://newtab/");
+  assert.deepEqual(afterStep({ tool: tool("tabs_create_mcp"), response: created, name, tab: "1258425714" }), {}, "a fresh empty tab says nothing yet");
+  // The navigation's own reply still shows the address that was asked for.
+  assert.deepEqual(afterStep({ tool: tool("navigate"), input: { url: home }, response: navigated, name, tab: "1258425714" }), { away: null });
+  // The next look shows where Namecheap really sent it.
+  assert.deepEqual(afterStep({ tool: tool("computer"), input: { action: "screenshot" }, response: shot, name, tab: "1258425714" }), { away: "www.namecheap.com", looked: true });
+  assert.equal(onMoneyPage({ tool: tool("computer"), response: shot, tab: "1258425714" }), false, "a login page is not a money page, though its address mentions the domain's page");
 });
 
 function fakeRegistry(nameservers = {}) {
