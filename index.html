@@ -394,6 +394,33 @@
       };
       card.append(open);
     }
+    // Short values to paste somewhere else, such as two nameservers.
+    const copies = (Array.isArray(n.copy) ? n.copy : []).filter(v => typeof v === "string" && /^[a-z0-9.-]{1,100}$/i.test(v)).slice(0, 4);
+    if (copies.length) {
+      const row = document.createElement("div");
+      row.className = "choices";
+      for (const value of copies) {
+        const b = document.createElement("button");
+        b.className = "soft";
+        b.textContent = "Copy " + value;
+        b.onclick = async () => {
+          let copied = false;
+          try { await navigator.clipboard.writeText(value); copied = true; } catch {
+            // The older way, which some phones still need.
+            const box = Object.assign(document.createElement("textarea"), { value, readOnly: true });
+            box.style.position = "fixed";
+            box.style.opacity = "0";
+            document.body.append(box);
+            box.select();
+            try { copied = document.execCommand("copy"); } catch { copied = false; }
+            box.remove();
+          }
+          say(copied ? "Copied " + value + "." : "Copy it from the text: " + value);
+        };
+        row.append(b);
+      }
+      card.append(row);
+    }
     if (n.choices && n.choices.length) {
       const row = document.createElement("div");
       row.className = "choices";
