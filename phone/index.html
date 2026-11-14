@@ -341,7 +341,7 @@
   function signInLink(url) {
     try {
       const u = new URL(url);
-      return u.protocol === "https:" && ["vercel.com", "github.com", "cli.github.com", "www.namecheap.com", "ap.www.namecheap.com"].includes(u.hostname) ? u.href : null;
+      return u.protocol === "https:" && ["vercel.com", "github.com", "cli.github.com", "www.namecheap.com", "ap.www.namecheap.com", "claude.ai", "git-scm.com"].includes(u.hostname) ? u.href : null;
     } catch { return null; }
   }
 

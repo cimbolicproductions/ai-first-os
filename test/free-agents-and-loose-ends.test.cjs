@@ -14,7 +14,7 @@ const { detectInstalledAgents } = require("../lib/agent-auth.cjs");
 const { readCodexEvent, plainLine } = require("../lib/activity.cjs");
 const { answerNotice, defaultCliRunner, dispatchBoardTask, queueOrganizerRequest, replyToOrganizer, buildWorkOrderPrompt } = require("../lib/os-runtime.cjs");
 const { classifyOrganizerRequest, asksForDomain } = require("../lib/request-flow.cjs");
-const { checkStep, afterStep, tabAddress, onMoneyPage, createdTab, isJobPage, guardSettings, MAX_STEPS } = require("../lib/browser-guard.cjs");
+const { checkStep, afterStep, clickableRefs, tabAddress, onMoneyPage, createdTab, isJobPage, guardSettings, MAX_STEPS } = require("../lib/browser-guard.cjs");
 const { domainStep, browserWorkOrder } = require("../lib/domains.cjs");
 const { shipVersion, defaultRun, createProject } = require("../lib/ship.cjs");
 const { installTool, installable, installCommand } = require("../lib/install.cjs");
@@ -212,7 +212,7 @@ test("the browser fence keeps a job to one tab, one page and two nameservers, an
   assert.equal(at({ tab: "7" }, "read_page", { tabId: 7 }).allow, false, "the page is not open yet");
   assert.equal(at({ tab: "7" }, "computer", { action: "left_click", coordinate: [1, 2], tabId: 7 }).allow, false);
   const opened = at({ tab: "7" }, "navigate", { url: home, tabId: 7 });
-  assert.deepEqual([opened.allow, opened.state], [true, { steps: 1, tab: "7", opened: true, looks: 0, looked: false, away: null }]);
+  assert.deepEqual([opened.allow, opened.state], [true, { steps: 1, tab: "7", opened: true, looks: 0, looked: false, away: null, refs: [] }]);
   // Right after a navigation nothing is clicked or typed until the job has looked at where it landed.
   assert.match(at({ tab: "7", opened: true }, "computer", { action: "left_click", coordinate: [1, 2], tabId: 7 }).why, /Look at the page first/);
   assert.equal(at({ tab: "7", opened: true }, "computer", { action: "screenshot", tabId: 7 }).allow, true);
@@ -224,7 +224,7 @@ test("the browser fence keeps a job to one tab, one page and two nameservers, an
   assert.equal(at({ tab: "7" }, "navigate", { url: "https://www.namecheap.com/shoppingcart/", tabId: 7 }).allow, false);
 
   // Every other tab is out of reach: reading it, clicking in it, sending it somewhere, or closing it.
-  const ready = { tab: "7", opened: true, steps: 3, looked: true };
+  const ready = { tab: "7", opened: true, steps: 3, looked: true, refs: ["ref_33", "ref_34"] };
   for (const [action, input] of [["read_page", { tabId: 8 }], ["get_page_text", {}], ["find", { tabId: "8", query: "x" }],
     ["computer", { action: "left_click", coordinate: [1, 2], tabId: 8 }], ["navigate", { url: home, tabId: 8 }], ["tabs_close_mcp", { tabId: 8 }], ["form_input", { value: "ns1.vercel-dns.com" }]]) {
     assert.equal(at(ready, action, input).allow, false, action + " on another tab");
@@ -232,14 +232,19 @@ test("the browser fence keeps a job to one tab, one page and two nameservers, an
   assert.equal(at(ready, "read_page", { tabId: 7 }).allow, true);
   assert.equal(at(ready, "tabs_close_mcp", { tabId: 7 }).allow, true);
 
-  // In its tab: the two nameservers and plain clicks, and nothing else.
+  // In its tab: the two nameservers, and clicks on elements read off the page as being about nameservers.
   assert.equal(at(ready, "computer", { action: "type", text: "ns1.vercel-dns.com", tabId: 7 }).allow, true);
-  assert.equal(at(ready, "form_input", { value: "NS2.VERCEL-DNS.COM.", tabId: 7 }).allow, true);
+  assert.equal(at(ready, "form_input", { ref: "ref_33", value: "NS2.VERCEL-DNS.COM.", tabId: 7 }).allow, true);
+  assert.equal(at(ready, "form_input", { ref: "ref_99", value: "ns1.vercel-dns.com", tabId: 7 }).allow, false, "only a box read off the page as a nameserver box");
   for (const typedText of ["4111 1111 1111 1111", "hunter2", "ns1.vercel-dns.com.evil.example", ""]) {
     assert.equal(at(ready, "computer", { action: "type", text: typedText, tabId: 7 }).allow, false, typedText);
-    assert.equal(at(ready, "form_input", { value: typedText, tabId: 7 }).allow, false, typedText);
+    assert.equal(at(ready, "form_input", { ref: "ref_33", value: typedText, tabId: 7 }).allow, false, typedText);
   }
-  assert.equal(at(ready, "computer", { action: "left_click", coordinate: [1, 2], tabId: 7 }).allow, true);
+  assert.equal(at(ready, "computer", { action: "left_click", ref: "ref_34", tabId: 7 }).allow, true);
+  assert.match(at(ready, "computer", { action: "left_click", coordinate: [1, 2], tabId: 7 }).why, /never by a position on the screen/);
+  assert.match(at(ready, "computer", { action: "left_click", ref: "ref_34", coordinate: [1, 2], tabId: 7 }).why, /never by a position on the screen/);
+  assert.match(at(ready, "computer", { action: "left_click", ref: "ref_39", tabId: 7 }).why, /not about nameservers/);
+  assert.match(at(ready, "computer", { action: "left_click", ref: "ref_34", modifiers: "ctrl", tabId: 7 }).why, /Plain clicks only/);
   assert.equal(at(ready, "computer", { action: "key", text: "ctrl+a", tabId: 7 }).allow, true);
   for (const input of [{ action: "key", text: "ctrl+v" }, { action: "right_click" }, { action: "left_click_drag" }, {}]) assert.equal(at(ready, "computer", { ...input, tabId: 7 }).allow, false);
   for (const action of ["javascript_tool", "file_upload", "upload_image", "something_new"]) assert.equal(at(ready, action, { tabId: 7 }).allow, false, action);
@@ -301,7 +306,7 @@ test("the browser fence keeps a job to one tab, one page and two nameservers, an
   assert.equal(login.status, 2);
   assert.match(login.stderr, /left the domain's page and is now on www\.namecheap\.com\. You may look, or close the tab, but not click or type here/);
   assert.equal(before("get_page_text", { tabId: 4242 }).status, 0);
-  assert.deepEqual(JSON.parse(fs.readFileSync(stateFile, "utf8")), { steps: 6, tab: "4242", opened: true, looks: 0, looked: true, away: "www.namecheap.com" }, "only steps that were allowed are counted");
+  assert.deepEqual(JSON.parse(fs.readFileSync(stateFile, "utf8")), { steps: 6, tab: "4242", opened: true, looks: 0, looked: true, away: "www.namecheap.com", refs: [] }, "only steps that were allowed are counted, and off the domain's page nothing is reachable");
   assert.equal(JSON.parse(after("computer", context("https://www.namecheap.com/checkout/")).stdout).continue, false, "the job's own tab on a checkout stops the job");
   assert.equal(JSON.parse(after("navigate", "now at https://www.namecheap.com/checkout").stdout).continue, false);
   // Unreadable input, a broken state file, or no state file at all: refused.
@@ -310,10 +315,13 @@ test("the browser fence keeps a job to one tab, one page and two nameservers, an
   assert.equal(before("read_page", { tabId: 4242 }).status, 2);
   // Two checks at the same moment cannot both use the last look at the tab list.
   fs.rmSync(stateFile, { force: true });
-  const looks = Array.from({ length: 6 }, () => require("node:child_process").spawn(process.execPath, [script, name, stateFile], { stdio: ["pipe", "ignore", "ignore"] }));
-  for (const child of looks) child.stdin.end(JSON.stringify({ hook_event_name: "PreToolUse", tool_name: tool("tabs_context_mcp"), tool_input: {} }));
-  const codes = [];
-  for (const child of looks) codes.push(await new Promise(resolve => child.on("close", resolve)));
+  // Each listener is attached the moment its process starts, so a fast finish is never missed.
+  const looks = Array.from({ length: 6 }, () => {
+    const child = require("node:child_process").spawn(process.execPath, [script, name, stateFile], { stdio: ["pipe", "ignore", "ignore"] });
+    return { child, done: new Promise(resolve => child.on("close", resolve)) };
+  });
+  for (const { child } of looks) child.stdin.end(JSON.stringify({ hook_event_name: "PreToolUse", tool_name: tool("tabs_context_mcp"), tool_input: {} }));
+  const codes = await Promise.all(looks.map(look => look.done));
   assert.equal(codes.filter(code => code === 0).length, 2, "exactly two looks, however many arrive together");
   assert.equal(fs.existsSync(stateFile + ".lock"), false);
   fs.rmSync(stateFile, { force: true });
@@ -339,6 +347,70 @@ test("the fence reads where the tab really is from Chrome's own replies, as reco
   // The next look shows where Namecheap really sent it.
   assert.deepEqual(afterStep({ tool: tool("computer"), input: { action: "screenshot" }, response: shot, name, tab: "1258425714" }), { away: "www.namecheap.com", looked: true });
   assert.equal(onMoneyPage({ tool: tool("computer"), response: shot, tab: "1258425714" }), false, "a login page is not a money page, though its address mentions the domain's page");
+});
+
+test("on the domain's own page, only elements labelled for nameservers can be clicked: never Renew, Auto-Renew, add-ons or Buy", () => {
+  // In the format Chrome's page reading really uses (recorded live on 2026-11-13). The labels are
+  // what Namecheap's domain page shows around nameservers, plus every money control near them.
+  const page = [
+    'combobox "Namecheap BasicDNS" [ref_30]',
+    'option "Custom DNS" [ref_31]',
+    'option "PremiumDNS" [ref_32]',
+    'textbox "Nameserver 1" [ref_33]',
+    'button "Save" [ref_34]',
+    'button "Save changes to Auto-Renew" [ref_35]',
+    'checkbox "Auto-Renew" [ref_36]',
+    'switch "Nameservers lock" [ref_37]',
+    'link "Nameservers help" [ref_38] href="/support/knowledgebase/nameservers/"',
+    'button "Renew" [ref_39]',
+    'button "Add PremiumDNS to cart" [ref_40]',
+    'button [ref_41]',
+    'link "Buy Premium DNS" [ref_42] href="#"',
+    'textbox "Nameserver 2" [ref_43] type="text"',
+    'button "Upgrade to PremiumDNS for $4.88/yr" [ref_44]',
+    'button "Domain Privacy" [ref_45]',
+    'button "Add Nameserver" [ref_46]',
+    'button "Save" [ref_47] (hidden)',
+  ].join("\n");
+  assert.deepEqual(clickableRefs([{ type: "text", text: page }]), ["ref_30", "ref_31", "ref_33", "ref_34", "ref_43", "ref_46"]);
+  assert.deepEqual(clickableRefs('ref_33 textbox "Nameserver 1" in "NAMESERVERS Custom DNS"\nref_44 button "Save" (hidden)\nref_45 button "Upgrade nameservers"'), ["ref_33"]);
+
+  // Through the hook's own bookkeeping: read on the job page, the labelled refs become reachable.
+  const name = "bakerysite.co";
+  const home = `https://ap.www.namecheap.com/domains/domaincontrolpanel/${name}/domain`;
+  const reply = address => [{ type: "text", text: page }, { type: "text", text: `\n\nTab Context:\n- Available tabs:\n  • tabId 7: "Domain" ("${address}")` }];
+  const tool = action => "mcp__claude-in-chrome__" + action;
+  assert.deepEqual(afterStep({ tool: tool("read_page"), input: { tabId: 7 }, response: reply(home), name, tab: "7" }).refsSeen, ["ref_30", "ref_31", "ref_33", "ref_34", "ref_43", "ref_46"]);
+  // Read anywhere else, nothing becomes reachable.
+  assert.equal(afterStep({ tool: tool("read_page"), input: { tabId: 7 }, response: reply("https://www.namecheap.com/shoppingcart/"), name, tab: "7" }).refsSeen, undefined);
+  // A new page means new elements: navigating clears every ref.
+  assert.deepEqual(checkStep({ tool: tool("navigate"), input: { url: home, tabId: 7 }, name, state: { tab: "7", opened: true, looked: true, refs: ["ref_34"] } }).state.refs, []);
+});
+
+test("when something stands in the way, the card goes straight to the fix", async t => {
+  const { notices, manifest, deps } = domainSetup(t, { "bakerysite.co": ["dns1.registrar-servers.com", "dns2.registrar-servers.com"] });
+  const opened = [];
+  deps.openUrl = url => opened.push(url);
+  deps.browserAgents = () => [claudeAgent];
+  deps.browserRun = async () => ({ code: 0, stdout: 'AIOS-RESULT: {"status":"not_signed_in"}' });
+  await domainStep({ then: bought, value: "bought", notices, manifest, deps });
+  const signIn = notices.listOpen().find(n => n.form === "namecheap");
+  assert.deepEqual([signIn.link, signIn.linkLabel], ["https://www.namecheap.com/myaccount/login/", "Sign in to Namecheap"]);
+  assert.deepEqual(opened, ["https://www.namecheap.com/myaccount/login/"], "and it opens on the computer");
+
+  const later = domainSetup(t, { "bakerysite.co": ["dns1.registrar-servers.com"] });
+  later.deps.browserAgents = () => [claudeAgent];
+  later.deps.browserRun = async () => ({ code: 0, stdout: 'AIOS-RESULT: {"status":"no_browser"}' });
+  await domainStep({ then: bought, value: "bought", notices: later.notices, manifest: later.manifest, deps: later.deps });
+  const extension = later.notices.listOpen().find(n => n.form === "namecheap");
+  assert.deepEqual([extension.link, extension.linkLabel], ["https://claude.ai/chrome", "Get the Claude extension"]);
+
+  // Both new pages may be shown as buttons, on the computer and on the phone.
+  const desktop = fs.readFileSync(path.join(__dirname, "..", "lib", "desktop-hud.cjs"), "utf8");
+  const phone = fs.readFileSync(path.join(__dirname, "..", "phone", "index.html"), "utf8");
+  for (const host of ['"claude.ai"', '"git-scm.com"']) {
+    assert.ok(desktop.includes(host) && phone.includes(host), host);
+  }
 });
 
 function fakeRegistry(nameservers = {}) {
@@ -905,7 +977,7 @@ test("a note that orders a send or a spend, from the Sheet or the phone, goes to
 });
 
 test("building work with nowhere to build is asked about, and a folder that cannot be made says why", async t => {
-  const { board, manifest, go } = setup(t);
+  const { board, manifest, notices, go } = setup(t);
   const projects = [{ name: "bakery-site", path: path.join(manifest.projectsHome, "bakery-site"), repo: null }, { name: "salon-booking", path: path.join(manifest.projectsHome, "salon-booking"), repo: null }];
   let builds = 0;
   const builder = work => async ({ mode }) => {
@@ -939,6 +1011,8 @@ test("building work with nowhere to build is asked about, and a folder that cann
     ? { status: "Waiting on User", result: "delegate", answer: "New.", delegation: { role: "builder", work: "Build it", newProject: "dog-grooming" } }
     : assert.fail("no folder, no build")), { projects, shipRun: async () => ({ code: 127, missing: true, stdout: "", stderr: "" }) });
   assert.match(board.getMeta(fresh.ID).answer, /because Git is not on this computer\. Install Git from git-scm\.com, then choose Try again\./);
+  const getGit = notices.listOpen().find(n => n.row === fresh.ID);
+  assert.deepEqual([getGit.link, getGit.linkLabel], ["https://git-scm.com/downloads", "Get Git"]);
   assert.notEqual(board.getMeta(fresh.ID).awaitingReply, true);
 });
 
