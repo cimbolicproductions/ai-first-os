@@ -245,6 +245,15 @@ test("the browser fence keeps a job to one tab, one page and two nameservers, an
   assert.match(at(ready, "computer", { action: "left_click", ref: "ref_34", coordinate: [1, 2], tabId: 7 }).why, /never by a position on the screen/);
   assert.match(at(ready, "computer", { action: "left_click", ref: "ref_39", tabId: 7 }).why, /not about nameservers/);
   assert.match(at(ready, "computer", { action: "left_click", ref: "ref_34", modifiers: "ctrl", tabId: 7 }).why, /Plain clicks only/);
+  // A look-only job reads and closes, and nothing else, even on elements labelled for nameservers.
+  const look = (action, input) => checkStep({ tool: tool(action), input, name, state: ready, lookOnly: true });
+  for (const [action, input] of [["computer", { action: "left_click", ref: "ref_34", tabId: 7 }], ["computer", { action: "type", text: "ns1.vercel-dns.com", tabId: 7 }], ["form_input", { ref: "ref_33", value: "ns1.vercel-dns.com", tabId: 7 }], ["computer", { action: "key", text: "Enter", tabId: 7 }]]) {
+    assert.match(look(action, input).why, /look-only job/, JSON.stringify(input));
+  }
+  for (const [action, input] of [["read_page", { tabId: 7 }], ["find", { tabId: 7, query: "nameservers" }], ["computer", { action: "screenshot", tabId: 7 }], ["tabs_close_mcp", { tabId: 7 }]]) {
+    assert.equal(look(action, input).allow, true, action);
+  }
+  assert.match(guardSettings({ name, counterFile: path.join(os.tmpdir(), "g.json"), lookOnly: true }).hooks.PreToolUse[0].hooks[0].command, /" look$/);
   assert.equal(at(ready, "computer", { action: "key", text: "ctrl+a", tabId: 7 }).allow, true);
   for (const input of [{ action: "key", text: "ctrl+v" }, { action: "right_click" }, { action: "left_click_drag" }, {}]) assert.equal(at(ready, "computer", { ...input, tabId: 7 }).allow, false);
   for (const action of ["javascript_tool", "file_upload", "upload_image", "something_new"]) assert.equal(at(ready, action, { tabId: 7 }).allow, false, action);
