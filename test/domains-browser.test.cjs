@@ -27,7 +27,8 @@ function setup(t) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "aios-browser-"));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const notices = createNoticeBook({ dir });
-  const manifest = { settings: {}, projects: [{ name: "bakery-site", path: path.join(dir, "bakery-site"), createdByOs: true, online: "yes" }] };
+  // The owner turned on letting an agent change nameservers in their Chrome. It is off by default.
+  const manifest = { settings: { domains: { agentPoints: "yes" } }, projects: [{ name: "bakery-site", path: path.join(dir, "bakery-site"), createdByOs: true, online: "yes" }] };
   const tools = [];
   const run = async (tool, args) => { tools.push(`${tool} ${args.join(" ")}`); return { code: 0, stdout: "", stderr: "" }; };
   return { notices, manifest, project: manifest.projects[0], tools, run };

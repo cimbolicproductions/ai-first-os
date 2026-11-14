@@ -438,6 +438,54 @@ test("the fence reads where the tab really is from Chrome's own replies, as reco
   assert.equal(onMoneyPage({ tool: tool("computer"), response: shot, tab: "1258425714" }), false, "a login page is not a money page, though its address mentions the domain's page");
 });
 
+test("by default nobody's agent touches Namecheap: the owner gets one link to that name's page, and the record decides", async t => {
+  const nameservers = { "bakerysite.co": OTHER };
+  const { notices, manifest, project, tools, jobs, deps } = domainSetup(t, nameservers, {});
+  const opened = [];
+  deps.openUrl = url => opened.push(url);
+  deps.browserAgents = () => [claudeAgent];
+  deps.browserRun = async ({ agent }) => { jobs.push(agent.id); return { code: 0, stdout: 'AIOS-RESULT: {"status":"done"}' }; };
+  const done = await domainStep({ then: bought, value: "bought", notices, manifest, deps });
+  assert.deepEqual(jobs, [], "no agent ran");
+  const step = done.asked;
+  assert.equal(step.link, "https://ap.www.namecheap.com/domains/domaincontrolpanel/bakerysite.co/domain");
+  assert.deepEqual(opened, [step.link], "it opens on the computer");
+  assert.deepEqual(step.copy, VERCEL);
+  assert.deepEqual(step.choices.map(c => c.label), ["Done", "Have Claude Code do it", "Use Namecheap's API"]);
+  assert.deepEqual(tools, ["vercel domains add bakerysite.co bakery-site"], "Vercel is told about the name and waits for it");
+
+  // Done too early: nothing is marked, and the same link and values come back.
+  const early = await domainStep({ then: step.then, value: "done", notices, manifest, deps });
+  assert.deepEqual(early, { ok: false, reason: "unverified" });
+  const again = notices.listOpen().find(n => n.then?.step === "manual-done" && n.choices[0].label === "Check again");
+  assert.deepEqual([again.link, again.copy], [step.link, VERCEL]);
+  // The record shows it: Vercel attaches the name, and only then is it called done.
+  nameservers["bakerysite.co"] = VERCEL;
+  const finished = await domainStep({ then: again.then, value: "done", notices, manifest, deps });
+  assert.deepEqual(finished, { ok: true, name: "bakerysite.co", verified: true });
+  assert.deepEqual(project.domain, { name: "bakerysite.co", state: "pointed" });
+  assert.ok(notices.listOpen().some(n => n.text === "bakerysite.co now points at bakery-site. It can take up to an hour to start working everywhere."));
+
+  // Asked for once, the agent does it this time, without turning the setting on.
+  const once = domainSetup(t, { "bakerysite.co": OTHER }, {});
+  once.deps.browserAgents = () => [claudeAgent];
+  once.deps.browserRun = async ({ agent }) => { once.jobs.push(agent.id); return { code: 0, stdout: 'AIOS-RESULT: {"status":"no_browser"}' }; };
+  const card = (await domainStep({ then: bought, value: "bought", notices: once.notices, manifest: once.manifest, deps: once.deps })).asked;
+  await domainStep({ then: card.then, value: "agent", notices: once.notices, manifest: once.manifest, deps: once.deps });
+  assert.deepEqual(once.jobs, ["claude"]);
+  assert.equal(once.manifest.settings.domains, undefined, "one time is not a setting");
+
+  // The copy values travel to the phone, and nothing but short plain values gets through.
+  const book = createNoticeBook({ dir: fs.mkdtempSync(path.join(os.tmpdir(), "aios-copy-")) });
+  const n = book.raise({ kind: "connect", text: "x", copy: ["ns1.vercel-dns.com", "ns2.vercel-dns.com", "<script>", "a".repeat(101), 7, "c.d", "e.f", "g.h"] });
+  assert.deepEqual(n.copy, ["ns1.vercel-dns.com", "ns2.vercel-dns.com", "c.d", "e.f"]);
+  const link = fs.readFileSync(path.join(__dirname, "..", "lib", "cloud-link.cjs"), "utf8");
+  assert.ok(link.includes("...(n.copy ? { copy: n.copy } : {})"));
+  const phone = fs.readFileSync(path.join(__dirname, "..", "phone", "index.html"), "utf8");
+  const desktop = fs.readFileSync(path.join(__dirname, "..", "lib", "desktop-hud.cjs"), "utf8");
+  for (const page of [phone, desktop]) assert.ok(page.includes('"Copy " + value') && page.includes("navigator.clipboard.writeText(value)") && page.includes('document.execCommand("copy")'));
+});
+
 test("when something stands in the way, the card goes straight to the fix", async t => {
   const { notices, manifest, deps } = domainSetup(t, { "bakerysite.co": ["dns1.registrar-servers.com", "dns2.registrar-servers.com"] });
   const opened = [];
@@ -479,7 +527,7 @@ const claudeAgent = { id: "claude", label: "Claude Code", path: "/bin/claude", b
 const codexAgent = { id: "codex", label: "Codex", path: "/bin/codex", browser: findHarness("codex").browser };
 const bought = { type: "domain", step: "bought", project: "bakery-site", row: "P1", name: "bakerysite.co" };
 
-function domainSetup(t, nameservers, settings = {}) {
+function domainSetup(t, nameservers, settings = { domains: { agentPoints: "yes" } }) {
   const { dir, notices } = setup(t);
   const manifest = { settings, projects: [{ name: "bakery-site", path: path.join(dir, "bakery-site"), createdByOs: true, online: "yes" }] };
   const tools = [];
@@ -498,7 +546,7 @@ test("Codex is never used for a browser job that changes something: only an agen
   const both = () => [{ id: "claude", signedIn: true, workerPath: "/bin/claude" }, { id: "codex", signedIn: true, workerPath: "/bin/codex" }];
   assert.deepEqual(findBrowserAgents({ env: {}, detect: both }).map(agent => agent.id), ["claude"]);
   // Handed one anyway, the domain step never runs it, and never asks to.
-  const { notices, manifest, jobs, deps } = domainSetup(t, { "bakerysite.co": OTHER }, { browser: { codex: "yes" } });
+  const { notices, manifest, jobs, deps } = domainSetup(t, { "bakerysite.co": OTHER }, { browser: { codex: "yes" }, domains: { agentPoints: "yes" } });
   deps.browserAgents = () => [claudeAgent, codexAgent];
   deps.browserRun = async ({ agent }) => { jobs.push(agent.id); return { code: 0, stdout: 'AIOS-RESULT: {"status":"no_browser"}' }; };
   await domainStep({ then: bought, value: "bought", notices, manifest, deps });
@@ -546,7 +594,8 @@ test("the registry is asked whatever the agent said, and a by-hand Done is check
   const odd = { ...done, name: "bakery.xyz" };
   const taken = await domainStep({ then: odd, value: "done", notices: none.notices, manifest: none.manifest, deps: none.deps });
   assert.deepEqual(taken, { ok: true, name: "bakery.xyz", verified: false });
-  assert.match(none.notices.listOpen().at(-1).text, /Names ending in \.xyz have no public record I can check, so this is on your word/);
+  assert.ok(none.notices.listOpen().some(n => /Names ending in \.xyz have no public record I can check, so bakery\.xyz is taken as set up on your word\./.test(n.text)));
+  assert.ok(none.notices.listOpen().some(n => n.text === "bakery.xyz now points at bakery-site. It can take up to an hour to start working everywhere."), "and Vercel is attached");
 });
 
 test("a test that forgets its stand-ins reaches nothing real: no network, no keyring, no GitHub, no Vercel, no installer", async t => {

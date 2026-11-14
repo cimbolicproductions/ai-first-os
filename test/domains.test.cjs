@@ -120,10 +120,23 @@ test("find, pick, buy on Namecheap's page, connect once, and the name points at 
   const watched = await picked.watching;
   assert.equal(net.calls.filter(c => c.url === "https://rdap.example/domain/bakerysite.co").length, 4, "one while finding names, two before the purchase, one after");
 
-  // Namecheap is not connected yet: one form on the computer, with this computer's address to allow.
-  const form = notices.listOpen().find(n => n.form === "namecheap");
-  assert.ok(watched.asked && form);
+  // The owner is still in Namecheap, signed in, having just paid: one link to that name's own
+  // page, opened on the computer too, with the two nameservers to copy. No agent clicks anything.
+  const step = notices.listOpen().find(n => n.then?.step === "manual-done");
+  assert.ok(watched.asked && step);
   assert.equal(notices.listOpen().some(n => n.then?.step === "bought"), false, "the buy prompt is closed");
+  assert.equal(step.link, "https://ap.www.namecheap.com/domains/domaincontrolpanel/bakerysite.co/domain");
+  assert.equal(step.linkLabel, "Open bakerysite.co in Namecheap");
+  assert.deepEqual(step.copy, ["ns1.vercel-dns.com", "ns2.vercel-dns.com"]);
+  assert.match(step.text, /^One more step while you are in Namecheap: on bakerysite.co's page, under Nameservers choose Custom DNS, enter ns1.vercel-dns.com and ns2.vercel-dns.com, and click the green check. Then choose Done.$/);
+  assert.deepEqual(step.choices.map(c => c.value), ["done", "api"], "no agent is offered when none can be fenced");
+  assert.equal(opened.at(-1), step.link);
+  tools.length = 0;
+
+  // Or connect Namecheap's API once: one form on the computer, with this computer's address to allow.
+  await domainStep({ then: step.then, value: "api", notices, manifest, deps });
+  const form = notices.listOpen().find(n => n.form === "namecheap");
+  assert.ok(form);
   assert.match(form.text, /bakerysite\.co is yours\. .*allow this computer's address 203\.0\.113\.7, then paste your Namecheap username and API key here\./);
   assert.equal(form.link, "https://ap.www.namecheap.com/settings/tools/apiaccess/");
   assert.deepEqual(form.choices, [{ label: "Do it by hand instead", value: "manual" }]);
@@ -174,8 +187,9 @@ test("doing it by hand gives the two nameservers and the page to set them on", a
   const then = { type: "domain", step: "dns", project: "bakery-site", row: "P1", name: "bakerysite.co" };
   await domainStep({ then, value: "manual", notices, manifest, deps: { run } });
   const steps = notices.listOpen().find(n => n.then?.step === "manual-done");
-  assert.match(steps.text, /set Nameservers to Custom DNS, and enter ns1\.vercel-dns\.com and ns2\.vercel-dns\.com/);
-  assert.equal(steps.link, "https://ap.www.namecheap.com/domains/list/");
+  assert.match(steps.text, /under Nameservers choose Custom DNS, enter ns1\.vercel-dns\.com and ns2\.vercel-dns\.com, and click the green check/);
+  assert.equal(steps.link, "https://ap.www.namecheap.com/domains/domaincontrolpanel/bakerysite.co/domain");
+  assert.deepEqual(steps.copy, ["ns1.vercel-dns.com", "ns2.vercel-dns.com"]);
   assert.deepEqual(tools.map(x => x.line), ["vercel domains add bakerysite.co bakery-site"]);
   // Done is only believed once the public record shows the change.
   const record = async url => {
