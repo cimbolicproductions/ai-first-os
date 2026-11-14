@@ -125,8 +125,16 @@ test("with nobody signed in, the question itself opens the sign-in and the task 
   assert.deepEqual(ask.choices, [{ label: "Sign in to Claude Code", value: "signin:claude" }]);
 
   const opened = [];
-  answerNotice({ noticeId: ask.id, value: "signin:claude", notices, board, manifest, detect, openSignIn: agent => { opened.push(agent.id); return { ok: true }; }, now: () => 1000 });
+  let finish;
+  const answered = answerNotice({ noticeId: ask.id, value: "signin:claude", notices, board, manifest, detect, openSignIn: agent => { opened.push(agent.id); return { ok: true }; }, now: () => 1000,
+    signInWatch: ({ id }) => new Promise(resolve => { assert.equal(id, "claude"); finish = resolve; }) });
   assert.deepEqual(opened, ["claude"]);
   assert.equal(board.findTask("P1").Status, "Open");
   assert.equal(board.getMeta("P1").retryAfter, 46000);
+  // The moment the sign-in finishes, the task may start at once, and the owner is called back to the chat.
+  finish(true);
+  assert.equal(await answered.signedIn, true);
+  assert.equal(board.getMeta("P1").retryAfter, null);
+  const back = notices.listOpen().find(n => n.text === "Signed in to Claude Code. Your task is starting.");
+  assert.equal(back?.back, true);
 });

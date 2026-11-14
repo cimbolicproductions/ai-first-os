@@ -168,7 +168,8 @@ test("when GitHub is not connected, the sign-in happens in the app and the work 
   approve({ ok: true });
   await answered.connecting;
   assert.equal(notices.listOpen().some(n => n.kind === "connect"), false, "the link goes away once used");
-  assert.equal(notices.listOpen().some(n => n.text === "Connected to GitHub."), true);
+  const connected = notices.listOpen().find(n => n.text === "Connected to GitHub. Carrying on.");
+  assert.equal(connected?.back, true, "the owner is called back to the chat");
   assert.ok(tools.lines().includes("gh repo create bakery-site --private --source . --remote origin --push"), "and the push that was waiting happened");
 
   // Not approved in time: one plain question to start it again.

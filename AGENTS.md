@@ -11,7 +11,7 @@ This repository is **AI-first OS** (`https://github.com/cimbolicproductions/ai-f
 - `lib/agent-auth.cjs`: Detects harnesses and sign-in state from the registry.
 - `lib/roles.cjs`: Default role slate, routing, substitution, audit pairing.
 - `lib/os-runtime.cjs`: Work orders, dispatch, report parsing, `answerNotice`, board watcher.
-- `lib/notices.cjs`: Every question or update for a person. All surfaces read this one book.
+- `lib/notices.cjs`: Every question or update for a person. All surfaces read this one book. A notice may carry `copy` (up to four short values shown as copy buttons) and `back: true` (the end of something the owner was waiting on, such as a sign-in or an install: the desktop page shows one system notification that brings them back to the chat when they are in another window, and the phone is rung). An agent's own sign-in window is watched by `watchSignIn` in `lib/os-runtime.cjs`, so the waiting task starts the moment it finishes.
 - `lib/audit-loop.cjs`: The Audit action and findings-to-fix-tasks loop.
 - `lib/versions.cjs`: Versions of a build. Owner notes and review findings are combined into one brief for the next version.
 - `lib/connect.cjs`: Service sign-ins run in the background; the approval link shows in the app and on the phone, and waiting work resumes when approved.

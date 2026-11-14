@@ -12,7 +12,7 @@ const { createNoticeBook } = require("../lib/notices.cjs");
 const { HARNESSES, findHarness, chooseFreeModel, olderThan, stopProcessTree, ownGroup, DEFAULT_FREE_MODEL } = require("../lib/harness-registry.cjs");
 const { detectInstalledAgents } = require("../lib/agent-auth.cjs");
 const { readCodexEvent, plainLine } = require("../lib/activity.cjs");
-const { answerNotice, defaultCliRunner, dispatchBoardTask, queueOrganizerRequest, replyToOrganizer, buildWorkOrderPrompt } = require("../lib/os-runtime.cjs");
+const { answerNotice, defaultCliRunner, dispatchBoardTask, queueOrganizerRequest, replyToOrganizer, buildWorkOrderPrompt, watchSignIn } = require("../lib/os-runtime.cjs");
 const { classifyOrganizerRequest, asksForDomain } = require("../lib/request-flow.cjs");
 const { checkStep, afterStep, changeableRefs, tabAddress, onMoneyPage, createdTab, isJobPage, guardSettings, MAX_STEPS } = require("../lib/browser-guard.cjs");
 const { domainStep, browserWorkOrder, findBrowserAgents, runBrowserAgent } = require("../lib/domains.cjs");
@@ -1124,4 +1124,29 @@ test("a line typed again in the Sheet after it was written over is taken again",
   assert.deepEqual(board.getMeta(build.ID).ownerNotes, ["Make the header blue", "Make the header blue"]);
   // Nothing is left pending once the Sheet has been written.
   assert.equal(board.listTasks().some(row => (board.getMeta(row.ID).sheetNotesPending || []).length || (board.getMeta(row.ID).sheetReceipt && board.getMeta(row.ID).sheetShown !== true)), false);
+});
+
+test("a sign-in that finishes brings the owner back: the agent's own is watched for, and the page calls them back once", async () => {
+  // Watched every few seconds until the agent is signed in, then it says so.
+  let looks = 0;
+  const detect = () => [{ id: "codex", signedIn: ++looks >= 3, headless: true }];
+  const sleeps = [];
+  assert.equal(await watchSignIn({ id: "codex", detect, sleep: async ms => { sleeps.push(ms); } }), true);
+  assert.deepEqual([looks, sleeps], [3, [3000, 3000]]);
+  // Never signed in within the time: it gives up quietly.
+  assert.equal(await watchSignIn({ id: "codex", detect: () => [{ id: "codex", signedIn: false, headless: true }], sleep: async () => {}, everyMs: 1000, forMs: 3000 }), false);
+  // Under the test runner with no clock passed in, it does not poll the real computer at all.
+  assert.equal(await watchSignIn({ id: "codex", detect: () => assert.fail("not looked at") }), false);
+
+  // The page: a "back" notice raises one system notification, only when the owner is somewhere else.
+  const page = fs.readFileSync(path.join(__dirname, "..", "lib", "desktop-hud.cjs"), "utf8");
+  assert.ok(page.includes('new Notification("AI-first OS"'));
+  assert.ok(page.includes('if (document.visibilityState === "visible" && document.hasFocus()) continue;'));
+  assert.ok(page.includes("note.onclick = () => { window.focus(); note.close(); };"));
+  assert.ok(page.includes("Notification.requestPermission()"), "asked on the owner's own click, never on page load");
+  // The phone is rung for it too.
+  assert.ok(fs.readFileSync(path.join(__dirname, "..", "lib", "cloud-link.cjs"), "utf8").includes("n.back === true"));
+  const book = createNoticeBook({ dir: fs.mkdtempSync(path.join(os.tmpdir(), "aios-back-")) });
+  assert.equal(book.raise({ kind: "done", text: "x", back: true }).back, true);
+  assert.equal(book.raise({ kind: "done", text: "y", back: "yes" }).back, undefined);
 });

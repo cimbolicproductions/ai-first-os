@@ -42,6 +42,8 @@ node bin/aios.cjs desktop
 
 **It keeps going.** If an agent is signed out or at its limit, another one takes the task and the board says who. If nobody can take it right now, it waits a minute and tries again. If your account cannot use the model an agent is set to, it switches to one that works.
 
+**Signing in is one click, and it brings you back.** Anything that needs your sign-in shows one button that opens the right page. You sign in there, and the app sees it finish by itself and carries on with the work that was waiting. If you were in another window, a notification says so, and clicking it takes you back to the chat.
+
 **It gets missing tools itself.** If the sign-in tool a service needs is not on your computer, the question has an **Add** button. It is fetched, the sign-in starts, and the waiting work carries on.
 
 **It uses what you already pay for.** Every run uses your subscription sign-ins. If a pay-per-use key is the only way forward, it asks first, once.
