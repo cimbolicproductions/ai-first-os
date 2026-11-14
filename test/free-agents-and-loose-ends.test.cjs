@@ -228,13 +228,18 @@ test("the browser fence: one tab, one page, and nothing changes without a fresh 
     assert.match(pre(action, input).why, /Work only in the tab this job opened \(tab 7\)/, action);
   }
   assert.equal(pre("navigate", { url: home, tabId: 7 }).allow, true);
+  // A load and a reading never overlap, in either order.
+  assert.match(pre("find", { tabId: 7, query: "nameservers" }).why, /still loading/);
+  assert.match(pre("navigate", { url: home, tabId: 7 }).why, /still loading/);
   post("navigate", { url: home, tabId: 7 }, ctx(home, `Navigated to ${home}`));
+  assert.equal(state.navigating, false);
   assert.deepEqual([state.confirmed, state.looked, state.refs], [true, false, []]);
 
   // No change before a reading, and only the elements that reading named.
   assert.match(pre("computer", { action: "left_click", ref: "ref_34", tabId: 7 }).why, /Read the page first/);
   assert.equal(pre("find", { tabId: 7, query: "nameservers" }).allow, true);
   assert.equal(state.reading, 1);
+  assert.match(pre("navigate", { url: home, tabId: 7 }).why, /reading is still in flight/);
   assert.match(pre("computer", { action: "left_click", ref: "ref_34", tabId: 7 }).why, /A page reading is still in flight/, "a change sent together with a reading waits for it");
   post("find", { tabId: 7 }, nsFind);
   assert.deepEqual([state.reading, state.looked, state.refs], [0, true, ["ref_30", "ref_31", "ref_34"]]);
@@ -338,6 +343,8 @@ test("which elements count as being about nameservers: the label, the surroundin
     'ref_40 button "Save" (hidden)',
     'ref_41 button "Save" in "Redirect Domain"',
     'ref_42 button "Save"',
+    'ref_43 link "Nameservers" in "NAMESERVERS"',
+    'ref_44 link "Custom DNS" in "NAMESERVERS"',
   ].join("\n");
   assert.deepEqual(changeableRefs(fromFind), ["ref_30", "ref_31", "ref_33", "ref_34", "ref_39"]);
   // Read_page gives no surroundings, so a plain Save from it never counts.
