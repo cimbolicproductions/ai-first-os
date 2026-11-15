@@ -188,9 +188,13 @@ test("Muse clarifies, keeps the answer on one row, and hands clear coding to the
   });
   assert.equal(board.findTask(row.ID).Status, "Waiting on User");
   assert.equal(board.getMeta(row.ID).awaitingReply, true);
-  assert.equal(notices.listOpen().length, 0, "clarification is a free-text reply, not approval");
-  const reply = { taskId: row.ID, text: "The sign-in button spins forever", turn: 1, board, manifest };
+  // The question is a card too, so it reaches the chat and the phone. It is answered in words, never with a button.
+  const [question] = notices.listOpen();
+  assert.deepEqual([notices.listOpen().length, question.kind, question.reply, question.choices, question.text], [1, "question", true, [], "Which login bug?"]);
+  assert.throws(() => answerNotice({ noticeId: question.id, value: "yes", board, notices, manifest }), { code: "INVALID_CHOICE" });
+  const reply = { taskId: row.ID, text: "The sign-in button spins forever", turn: 1, board, manifest, notices };
   replyToOrganizer(reply);
+  assert.equal(notices.listOpen().length, 0, "the answer closes the card");
   assert.throws(() => replyToOrganizer(reply), { code: "STALE_REPLY" });
   const roles = [];
   await run(row, async ({ agent, mode, prompt }) => {

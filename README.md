@@ -18,7 +18,7 @@ node bin/aios.cjs desktop
 
 **You talk. It organizes.** Type a request or tap **Voice dump** and say everything on your mind. Your organizer turns it into separate tasks on the board and gives each one to the right agent.
 
-**It asks before it builds.** If you say "build me a website," it first asks what it is for, who will use it, and what finished looks like. It keeps asking, a few short questions at a time, until it has a clear picture of the best version of what you want. Say "go ahead" or "you decide" at any point and it stops asking, makes the remaining choices itself, and writes them down where you can see them.
+**It asks before it builds.** If you say "build me a website," it first asks what it is for, who will use it, and what finished looks like. It keeps asking, a few short questions at a time, until it has a clear picture of the best version of what you want. Say "go ahead" or "you decide" at any point and it stops asking, makes the remaining choices itself, and writes them down where you can see them. Its question opens in the chat with a box to answer it, and reaches your phone the same way, so a request never goes quiet without telling you why. The chat always opens on the newest request that needs you.
 
 **You pick the crew.** Under the box, choose your organizer, your first and second coding agent, and your first and second research agent. If the first is busy or out, the second takes it.
 
@@ -58,7 +58,7 @@ node bin/aios.cjs desktop
 
 **Agents cannot buy anything from the command line either.** The command lines on your computer can spend money: Vercel's can buy a domain or add a paid add-on. Claude Code and OpenCode refuse those commands before they run, whatever they were told, and Codex builds with no internet. Antigravity and Cursor have no way to block one command at a time, so for them it is only their instructions.
 
-**Your phone is the front door.** When something is waiting on you, the question has **Answer from your phone**. Tap it, sign in once, and point your phone's camera at the code that appears. You can also open it any time from **Phone**. Send requests from anywhere. Questions come back with one-tap answers. The phone shows honestly whether your computer is online, and requests wait for it if it is not.
+**Your phone is the front door.** When something is waiting on you, the question has **Answer from your phone**. Tap it, sign in once, and point your phone's camera at the code that appears. You can also open it any time from **Phone**. Send requests from anywhere. Questions come back with one-tap answers, or a box to type your answer when it needs words. The phone shows honestly whether your computer is online, and requests wait for it if it is not.
 
 **Notes work from your phone.** An update about a finished build has **Add a note**. What you write goes into the next version, the same as a note typed on the computer.
 
