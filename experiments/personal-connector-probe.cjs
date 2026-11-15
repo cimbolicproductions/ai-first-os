@@ -1,7 +1,8 @@
 "use strict";
 
+const http = require("node:http");
 const { randomUUID, createHash, timingSafeEqual } = require("node:crypto");
-const { createFileStore, createRelayServer } = require("../lib/relay-host.cjs");
+const { createFileStore } = require("../lib/relay-host.cjs");
 const { queueOrganizerRequest } = require("../lib/request-flow.cjs");
 
 const VERSION = "2025-06-18";
@@ -24,10 +25,83 @@ const reportTool = {
   },
 };
 
+const receiptSchema = {
+  type: "object", required: ["request_id", "state", "updated_at"],
+  properties: {
+    request_id: { type: "string", format: "uuid" },
+    state: { type: "string", description: "queued until the home computer adopts it, then the board status such as Open." },
+    task_id: { type: "string", description: "The board task it became, once adopted." },
+    updated_at: { type: "string", format: "date-time" },
+  },
+};
+const errorSchema = { type: "object", properties: { error: { type: "string" } } };
+const json = schema => ({ content: { "application/json": { schema } } });
+
+/** The API description Muse reads when the owner asks it to create a custom connector. Holds no secrets. */
+function openApiDocument(publicUrl) {
+  return {
+    openapi: "3.1.0",
+    info: {
+      title: "AI-first OS connector probe",
+      version: "0.1.0",
+      description: "Test only. Submit one synthetic request to AI-first OS and read its status. The text must be 'AIOS probe' followed by a space and 6 to 40 lowercase letters or digits.",
+    },
+    ...(publicUrl ? { servers: [{ url: publicUrl }] } : {}),
+    security: [{ bearer: [] }],
+    components: { securitySchemes: { bearer: { type: "http", scheme: "bearer" } } },
+    paths: {
+      "/requests": { post: {
+        operationId: "submitRequest",
+        summary: "Submit a synthetic test request. Retrying with the same key returns the same receipt.",
+        requestBody: { required: true, ...json({
+          type: "object", additionalProperties: false, required: ["text", "idempotency_key"],
+          properties: {
+            text: { type: "string", pattern: "^AIOS probe [a-z0-9]{6,40}$" },
+            idempotency_key: { type: "string", format: "uuid", description: "Make one new UUID for each request and reuse it on any retry." },
+          },
+        }) },
+        responses: { 200: { description: "Already received.", ...json(receiptSchema) }, 201: { description: "Saved.", ...json(receiptSchema) },
+          400: { description: "Invalid input.", ...json(errorSchema) }, 401: { description: "Wrong token.", ...json(errorSchema) },
+          409: { description: "Key reused for different text.", ...json(errorSchema) } },
+      } },
+      "/status": { post: {
+        operationId: "getRequestStatus",
+        summary: "Read the latest status of a request this connector submitted.",
+        requestBody: { required: true, ...json({
+          type: "object", additionalProperties: false, required: ["request_id"],
+          properties: { request_id: { type: "string", format: "uuid" } },
+        }) },
+        responses: { 200: { description: "Latest status.", ...json(receiptSchema) },
+          401: { description: "Wrong token.", ...json(errorSchema) }, 404: { description: "Unknown request.", ...json(errorSchema) } },
+      } },
+    },
+  };
+}
+
+function readJson(req, limit = 16 * 1024) {
+  return new Promise((resolve, reject) => {
+    let size = 0;
+    const chunks = [];
+    req.on("data", chunk => {
+      size += chunk.length;
+      if (size > limit) { reject(Object.assign(new Error("Too large"), { code: "TOO_LARGE" })); req.destroy(); }
+      else chunks.push(chunk);
+    });
+    req.on("end", () => {
+      try { const text = Buffer.concat(chunks).toString("utf8"); resolve(text ? JSON.parse(text) : {}); }
+      catch { resolve(null); }
+    });
+    req.on("error", reject);
+  });
+}
+
 /** Synthetic transport probe. One process and one private file per run. No board credentials or references. */
-function createConnectorProbe({ file, museToken, grokToken, now = Date.now }) {
+function createConnectorProbe({ file, museToken, grokToken, publicUrl, now = Date.now }) {
   if (![museToken, grokToken].every(token => typeof token === "string" && token.length >= 32) || museToken === grokToken) {
     throw new Error("Supply two distinct, randomly generated probe tokens.");
+  }
+  if (publicUrl !== undefined && !/^https:\/\/[^\s/?#]+$/.test(publicUrl)) {
+    throw new Error("The public address must be a bare https:// origin.");
   }
   const credentials = { muse: digest(museToken), grok: digest(grokToken) };
   const store = createFileStore({ file, now });
@@ -158,8 +232,23 @@ function createConnectorProbe({ file, museToken, grokToken, now = Date.now }) {
     return status(body?.request_id);
   }
 
+  // Its own small server: only the probe's routes. The shared relay server would also hand out the phone page.
+  const server = http.createServer(async (req, res) => {
+    const route = req.url.split("?")[0];
+    let out;
+    try {
+      if (req.method === "GET" && route === "/openapi.json") out = reply(200, openApiDocument(publicUrl));
+      else out = await handle({ method: req.method, path: route, headers: req.headers, body: req.method === "POST" ? await readJson(req) : {} });
+    } catch (err) {
+      out = err?.code === "TOO_LARGE" ? failure(413, "Request too large.") : failure(400, "Bad request.");
+    }
+    if (res.destroyed) return;
+    res.writeHead(out.status, out.headers);
+    res.end(out.body === null ? "" : JSON.stringify(out.body));
+  });
+
   return {
-    server: createRelayServer({ relay: { handle } }),
+    server,
     start,
     // Only the local test harness holds a board reference; the provider never can access this operation.
     syncRequests: ({ board, manifest }) => transaction(data => {
@@ -186,4 +275,4 @@ function createConnectorProbe({ file, museToken, grokToken, now = Date.now }) {
   };
 }
 
-module.exports = { createConnectorProbe };
+module.exports = { createConnectorProbe, openApiDocument };
