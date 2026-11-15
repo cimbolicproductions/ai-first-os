@@ -634,8 +634,7 @@ test("11. work reaches agents without a shell, and silent auth failures are caug
   assert.deepEqual(tried, ["codex", "claude"]);
   assert.equal(res.status, "Done");
 
-  // A build keeps its write access through a chain of fallbacks, and never lands on Antigravity,
-  // which cannot be stopped from running a command that buys something.
+  // A build keeps its write access through a chain of fallbacks.
   board.addTask({ task: "Long chain", to: "codex" });
   const modes = [];
   await dispatchBoardTask({

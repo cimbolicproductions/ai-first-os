@@ -299,7 +299,10 @@ test("Antigravity receives a work-order path without user text in argv", async t
     }),
   });
   assert.equal(result.answer, "Finished");
-  assert.equal(fs.readFileSync(path.join(dir, ".aios", "work-orders", "P1.md"), "utf8"), task.Task);
+  // A writing run opens with Antigravity's limits (no commands), then the request itself.
+  const order = fs.readFileSync(path.join(dir, ".aios", "work-orders", "P1.md"), "utf8");
+  assert.match(order, /^In this run you can read and edit files/);
+  assert.ok(order.endsWith("\n\n" + task.Task));
 });
 
 test("read-only work selects the harness's explicit plan or ask mode", () => {
