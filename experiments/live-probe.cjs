@@ -71,7 +71,7 @@ const listen = (server, port, host) => new Promise((resolve, reject) => {
   server.listen(port, host, () => { server.off("error", reject); resolve(server.address().port); });
 });
 
-async function startLiveProbe({ dir = DEFAULT_DIR, port = 8787, adminPort = 8788, publicUrl, fetchImpl = fetch } = {}) {
+async function startLiveProbe({ dir = DEFAULT_DIR, port = 8787, adminPort = 8788, publicUrl, fetchImpl = fetch, syncEveryMs = 0, stopAfterMs = 0, onStop = () => {} } = {}) {
   const secrets = loadSecrets(dir);
   fs.writeFileSync(path.join(dir, "grok-routine-instruction.txt"), ROUTINE_INSTRUCTION + "\n");
   const probe = createConnectorProbe({ file: path.join(dir, "probe-store.json"), museToken: secrets.muse, grokToken: secrets.grok, publicUrl });
@@ -124,30 +124,54 @@ async function startLiveProbe({ dir = DEFAULT_DIR, port = 8787, adminPort = 8788
 
   const probePort = await listen(probe.server, port, "127.0.0.1");
   const adminPortBound = await listen(admin, adminPort, "127.0.0.1");
+
+  // Like a home computer would: adopt anything Muse sent into the throwaway board, so its next
+  // status check already shows the board task.
+  let syncing = false;
+  const syncTimer = syncEveryMs > 0 ? setInterval(async () => {
+    if (syncing) return;
+    syncing = true;
+    try { await probe.syncRequests({ board, manifest: {} }); }
+    catch (err) { console.error("Adopting Muse requests failed:", err.message); }
+    finally { syncing = false; }
+  }, syncEveryMs) : null;
+
+  let closed = null;
+  const close = () => closed ||= (clearInterval(syncTimer), clearTimeout(stopTimer),
+    Promise.all([probe.server, admin].map(s => new Promise(resolve => { s.closeAllConnections?.(); s.close(() => resolve()); }))));
+  // A forgotten public test address stops answering on its own.
+  const stopTimer = stopAfterMs > 0 ? setTimeout(() => close().then(onStop), stopAfterMs) : null;
+
   return {
     probeUrl: `http://127.0.0.1:${probePort}`,
     adminUrl: `http://127.0.0.1:${adminPortBound}`,
     dir,
     tokenFile: secrets.file,
-    close: () => Promise.all([probe.server, admin].map(s => new Promise(resolve => s.close(resolve)))),
+    close,
   };
 }
 
 function parseArgs(argv) {
-  const out = {};
+  // From the command line: adopt Muse requests every 5 seconds and stop after 2 hours unless told otherwise.
+  const out = { syncEveryMs: 5_000, stopAfterMs: 120 * 60_000 };
   for (let i = 0; i < argv.length; i += 2) {
     const [flag, value] = [argv[i], argv[i + 1]];
     if (flag === "--port") out.port = Number(value);
     else if (flag === "--admin-port") out.adminPort = Number(value);
     else if (flag === "--public-url") out.publicUrl = value;
     else if (flag === "--dir") out.dir = value;
+    else if (flag === "--sync-every") out.syncEveryMs = Number(value) * 1000;
+    else if (flag === "--stop-after") out.stopAfterMs = Number(value) * 60_000;
     else throw new Error(`Unknown option ${flag}`);
   }
   return out;
 }
 
 if (require.main === module) {
-  startLiveProbe(parseArgs(process.argv.slice(2))).then(live => {
+  const options = parseArgs(process.argv.slice(2));
+  options.onStop = () => { console.log("Time limit reached. The probe has stopped."); process.exit(0); };
+  startLiveProbe(options).then(live => {
+    console.log(`Stops by itself at ${new Date(Date.now() + options.stopAfterMs).toLocaleTimeString()}.`);
     console.log(`Probe (the only part to expose publicly): ${live.probeUrl}`);
     console.log("  Muse: POST /requests, POST /status, description at GET /openapi.json");
     console.log("  Grok Bot connector: POST /mcp");

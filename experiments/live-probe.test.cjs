@@ -113,6 +113,26 @@ test("the Muse loop over real HTTP: submit, adopt into the throwaway board, read
   assert.deepEqual([status.state, status.task_id], ["Open", synced.board[0].id]);
 });
 
+test("left running, it adopts Muse requests by itself and shuts off at its time limit", async t => {
+  const dir = tempDir(t);
+  let stopped = false;
+  const live = await startLiveProbe({ dir, port: 0, adminPort: 0, syncEveryMs: 30, stopAfterMs: 600, onStop: () => { stopped = true; } });
+  t.after(live.close);
+  const tokens = JSON.parse(fs.readFileSync(live.tokenFile, "utf8"));
+  const muse = { authorization: "Bearer " + tokens.muse };
+  const [, receipt] = await post(live.probeUrl + "/requests", { text: "AIOS probe autoadopt1", idempotency_key: randomUUID() }, muse);
+  let status;
+  for (let i = 0; i < 30 && status?.state !== "Open"; i++) {
+    await new Promise(resolve => setTimeout(resolve, 20));
+    [, status] = await post(live.probeUrl + "/status", { request_id: receipt.request_id }, muse);
+  }
+  assert.equal(status.state, "Open");
+  assert.match(status.task_id, /^P\d+$/);
+  await new Promise(resolve => setTimeout(resolve, 800));
+  assert.equal(stopped, true);
+  await assert.rejects(fetch(live.probeUrl + "/openapi.json"));
+});
+
 test("the runner prints where things are but never a token", async t => {
   const dir = tempDir(t);
   const child = spawn(process.execPath, [path.join(__dirname, "live-probe.cjs"), "--port", "0", "--admin-port", "0", "--dir", dir]);
