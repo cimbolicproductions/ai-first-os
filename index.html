@@ -361,8 +361,34 @@
       a.textContent = typeof n.linkLabel === "string" && n.linkLabel ? n.linkLabel.slice(0, 40) : "Open the sign-in page";
       card.append(a);
     }
+    // A question from the organizer is answered in words, right on the card.
+    if (n.reply === true && /^P[1-9][0-9]{0,6}$/.test(String(n.row || ""))) {
+      const box = document.createElement("textarea");
+      box.className = "note-box reply-box";
+      box.rows = 3;
+      box.maxLength = 3900;
+      box.placeholder = "Your answer";
+      const send = document.createElement("button");
+      send.textContent = "Send answer";
+      send.onclick = async () => {
+        const words = box.value.trim();
+        if (!words) return;
+        send.disabled = true;
+        try {
+          await call("POST", "request", { text: "Reply for " + n.row + ": " + words });
+          answered.add(n.id);
+          card.remove();
+          say("Answer sent.");
+          refresh();
+        } catch (err) {
+          send.disabled = false;
+          say(err.message);
+        }
+      };
+      card.append(box, send);
+    }
     // An update about a piece of work can take a note for its next version.
-    if (!(n.choices && n.choices.length) && n.kind === "done" && /^P[1-9][0-9]{0,6}$/.test(String(n.row || ""))) {
+    if (!(n.choices && n.choices.length) && n.reply !== true && n.kind === "done" && /^P[1-9][0-9]{0,6}$/.test(String(n.row || ""))) {
       const open = document.createElement("button");
       open.className = "soft note-open";
       open.textContent = "Add a note";
@@ -458,11 +484,14 @@
         ? "Home computer online"
         : "Home computer offline" + (s.queued ? " · " + s.queued + " waiting for it" : " · requests will wait for it");
       const open = s.notices.filter(n => !answered.has(n.id));
-      const asks = open.filter(n => n.choices && n.choices.length);
-      const info = open.filter(n => !(n.choices && n.choices.length));
+      const waitsOnYou = n => (n.choices && n.choices.length) || n.reply === true;
+      const asks = open.filter(waitsOnYou);
+      const info = open.filter(n => !waitsOnYou(n));
       $("waitingWrap").hidden = !asks.length;
       const askKey = asks.map(n => n.id).join();
-      if (askKey !== lastAsks) { lastAsks = askKey; $("waiting").replaceChildren(...asks.map(noticeCard)); }
+      // Left alone while an answer is being typed.
+      const typing = [...document.querySelectorAll(".reply-box")].some(box => box.value.trim());
+      if (askKey !== lastAsks && !typing) { lastAsks = askKey; $("waiting").replaceChildren(...asks.map(noticeCard)); }
       $("updatesWrap").hidden = !info.length;
       // Left alone while a note is being written, so the box does not vanish mid-sentence.
       const infoKey = info.slice(-5).map(n => n.id).join();
