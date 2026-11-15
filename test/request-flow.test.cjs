@@ -9,7 +9,7 @@ const { EventEmitter } = require("node:events");
 const { createLocalBoard } = require("../adapters/local-board.cjs");
 const { createNoticeBook } = require("../lib/notices.cjs");
 const { auditOffers } = require("../lib/audit-loop.cjs");
-const { answerNotice, defaultCliRunner, dispatchBoardTask, queueOrganizerRequest, replyToOrganizer } = require("../lib/os-runtime.cjs");
+const { answerNotice, defaultCliRunner, dispatchBoardTask, queueOrganizerRequest, replyToOrganizer, buildWorkOrderPrompt } = require("../lib/os-runtime.cjs");
 const { summarizeOpenTasks, parseRequestResult } = require("../lib/request-flow.cjs");
 
 function setup(t) {
@@ -31,6 +31,20 @@ function setup(t) {
   });
   return { dir, board, notices, manifest, availability, queue, run };
 }
+
+test("every example result the organizer is shown carries a title the parser keeps", () => {
+  // The prompt and the parser must agree on the field name, or titles silently never arrive
+  // and the formatter fallback hides it.
+  const prompt = buildWorkOrderPrompt({ ID: "P1", Task: "Sort my week", To: "muse" }, {}, { musePhase: "organize", intent: "coding", projects: [] });
+  const examples = [...prompt.matchAll(/AIOS-RESULT: (\{.*\})/g)].map(m => m[1]);
+  assert.equal(examples.length, 4);
+  for (const json of examples) {
+    const parsed = parseRequestResult("AIOS-RESULT: " + json);
+    assert.ok(parsed, json);
+    assert.ok(parsed.displayTitle, "no title kept from " + json);
+    for (const item of parsed.split || []) assert.ok(item.displayTitle, "no split title kept from " + json);
+  }
+});
 
 test("a voice dump becomes separate board tasks, one owner each, and gated work still asks", async t => {
   const { board, notices, queue, run } = setup(t);
