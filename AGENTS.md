@@ -28,7 +28,8 @@ This repository is **AI-first OS** (`https://github.com/cimbolicproductions/ai-f
 - `lib/relay-core.cjs`: Phone/computer meeting point. Web-standard APIs only, no imports, because it also runs in a Supabase Edge Function.
 - `lib/relay-host.cjs`: File store, local server, and the generated Edge Function.
 - `lib/cloud-link.cjs`, `lib/home-service.cjs`: Home machine heartbeat, intake, outbox, background service.
-- `lib/backend-provision.cjs`: Creates the user's backend behind one sign-in. Stops at any possible cost.
+- `lib/backend-provision.cjs`: Creates the user's backend behind one sign-in. Stops at any possible cost. `updateRelay` redeploys only the relay code (no new tokens, no re-pairing) when an older relay lacks newer routes; `RELAY_VERSION` in `relay-core.cjs` comes back on every heartbeat.
+- `lib/muse-connect.cjs`: Connect Muse. Makes Muse's key on the owner's press, sends only its hash to the relay (`POST connector`, home only), shows the key once and never saves it. Muse's own key reaches exactly two relay routes, `POST requests` (atomic by idempotency key through `claimState`) and `POST status`; `GET museapi` is the public OpenAPI description, served only while Muse is connected. `lib/cloud-link.cjs` adopts each Muse request once (`deduplicateSource` in the board's lock) and reports its state back with `POST agentstatus` before acknowledging it.
 - `lib/autostart.cjs`, `lib/web-push.cjs`, `lib/daily-summary.cjs`, `lib/vault-options.cjs`, `lib/vault-bootstrap.cjs`, `lib/keyring.cjs`, `lib/ideology.cjs`, `lib/workspace.cjs`.
 - `adapters/local-board.cjs`, `adapters/sheets-board.cjs`, `adapters/doorbell.cjs`: Boards and the content-free doorbell.
 - `phone/`: The static phone page, published from the `gh-pages` branch. Republish that branch when this folder changes.

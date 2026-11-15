@@ -210,11 +210,23 @@ function createLocalBoard({ boardDir, routerName = "Router", now = () => new Dat
     return withLock(() => addTaskLocked(input));
   }
 
-  function addTaskLocked({ id, task, to = "claude", from = routerName, order, specFile = "none", note, meta = null }) {
+  function addTaskLocked({ id, task, to = "claude", from = routerName, order, specFile = "none", note, meta = null, deduplicateSource = false }) {
     if (!task || !String(task).trim()) {
       throw Object.assign(new Error("Task description is required"), { code: "INVALID_TASK" });
     }
     const state = readState();
+    if (deduplicateSource && meta?.source && meta.sourceRequest) {
+      const existing = state.rows.find(row => {
+        const receipt = state.meta?.[row.ID];
+        return receipt?.source === meta.source && receipt.sourceRequest === meta.sourceRequest;
+      });
+      if (existing) {
+        if (existing.Task !== String(task).trim()) {
+          throw Object.assign(new Error("Request text changed for an existing receipt."), { code: "SOURCE_REQUEST_CONFLICT" });
+        }
+        return structuredClone(existing);
+      }
+    }
     const nextNum = state.rows.length + 1;
     const taskId = id || `P${nextNum}`;
     if (state.rows.some(r => r.ID === taskId)) {

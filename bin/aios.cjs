@@ -27,6 +27,7 @@ const { startHomeServices } = require("../lib/home-service.cjs");
 const { installAutostart, removeAutostart, isAutostartInstalled, keepAlive } = require("../lib/autostart.cjs");
 const { connectBackend, SECRET_NAMES } = require("../lib/backend-provision.cjs");
 const { newToken, buildPhoneLink } = require("../lib/cloud-link.cjs");
+const { createMuseConnection } = require("../lib/muse-connect.cjs");
 
 const CLI_PATH = __filename;
 const NEEDS_SETUP = "AI-first OS is not set up here yet. Run `node bin/aios.cjs` first.";
@@ -690,6 +691,7 @@ if (require.main === module) {
             return result;
           },
         },
+        muse: createMuseConnection({ readSecret, saveManifest: saver, product: loadProductConfig() }),
         async onIntroComplete({ selection, detected }) {
           const made = await runInit({ workspaceRoot: root, answers: profileFromIntro(selection, detected), detected });
           service = await startHomeServices({ workspaceRoot: root, manifest: made.manifest, saveManifest: saver });

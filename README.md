@@ -62,6 +62,8 @@ node bin/aios.cjs desktop
 
 **Notes work from your phone.** An update about a finished build has **Add a note**. What you write goes into the next version, the same as a note typed on the computer.
 
+**Your Muse can send you requests.** Once your phone is connected, open **Agents** and choose **Connect Muse**. You get one sentence to send to Muse and one key to paste when Muse asks for it. After that, tell Muse "add this to AI-first OS" and the request lands on your board, marked as from Muse. Muse can also tell you where a request stands, including a question waiting for you. It cannot answer questions or approve anything: you do that in AI-first OS. The key is shown once and never saved on your computer. **New key** replaces it and **Turn off Muse** stops it at once. An older phone connection asks for a one-time update first: you sign in to Supabase once, and your phone stays connected.
+
 **Some things always ask first.** Any spending, anything sent to other people, any public submission, and any refund or billing change need your explicit yes, every time.
 
 **Your notes stay yours.** Plain folders and Markdown on your own computer. Nothing uploads them.
