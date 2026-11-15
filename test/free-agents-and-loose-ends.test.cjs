@@ -15,7 +15,7 @@ const { readCodexEvent, plainLine } = require("../lib/activity.cjs");
 const { answerNotice, defaultCliRunner, dispatchBoardTask, queueOrganizerRequest, replyToOrganizer, buildWorkOrderPrompt, watchSignIn } = require("../lib/os-runtime.cjs");
 const { classifyOrganizerRequest, asksForDomain } = require("../lib/request-flow.cjs");
 const { checkStep, afterStep, changeableRefs, tabAddress, onMoneyPage, createdTab, isJobPage, guardSettings, MAX_STEPS } = require("../lib/browser-guard.cjs");
-const { domainStep, browserWorkOrder, findBrowserAgents, runBrowserAgent } = require("../lib/domains.cjs");
+const { domainStep, browserWorkOrder, findBrowserAgents, runBrowserAgent, isLive, waitForLive } = require("../lib/domains.cjs");
 const { shipVersion, defaultRun, createProject } = require("../lib/ship.cjs");
 const { installTool, installable, installCommand } = require("../lib/install.cjs");
 const { createCloudLink } = require("../lib/cloud-link.cjs");
@@ -464,7 +464,7 @@ test("by default nobody's agent touches Namecheap: the owner gets one link to th
   const finished = await domainStep({ then: again.then, value: "done", notices, manifest, deps });
   assert.deepEqual(finished, { ok: true, name: "bakerysite.co", verified: true });
   assert.deepEqual(project.domain, { name: "bakerysite.co", state: "pointed" });
-  assert.ok(notices.listOpen().some(n => n.text === "bakerysite.co now points at bakery-site. It can take up to an hour to start working everywhere."));
+  assert.ok(notices.listOpen().some(n => n.text === "bakerysite.co is set up for bakery-site in Vercel. I am checking that the site answers there; it can take up to an hour."));
 
   // Asked for once, the agent does it this time, without turning the setting on.
   const once = domainSetup(t, { "bakerysite.co": OTHER }, {});
@@ -595,7 +595,7 @@ test("the registry is asked whatever the agent said, and a by-hand Done is check
   const taken = await domainStep({ then: odd, value: "done", notices: none.notices, manifest: none.manifest, deps: none.deps });
   assert.deepEqual(taken, { ok: true, name: "bakery.xyz", verified: false });
   assert.ok(none.notices.listOpen().some(n => /Names ending in \.xyz have no public record I can check, so bakery\.xyz is taken as set up on your word\./.test(n.text)));
-  assert.ok(none.notices.listOpen().some(n => n.text === "bakery.xyz now points at bakery-site. It can take up to an hour to start working everywhere."), "and Vercel is attached");
+  assert.ok(none.notices.listOpen().some(n => n.text === "bakery.xyz is set up for bakery-site in Vercel. I am checking that the site answers there; it can take up to an hour."), "and Vercel is attached");
 });
 
 test("a test that forgets its stand-ins reaches nothing real: no network, no keyring, no GitHub, no Vercel, no installer", async t => {
@@ -1165,4 +1165,68 @@ test("on Namecheap's real domain page (recorded 2026-11-14), every money control
   for (const ref of ["ref_234", "ref_236", "ref_242", "ref_245", "ref_247", "ref_281", "ref_285", "ref_307"]) {
     assert.equal(changeableRefs(find).includes(ref) || changeableRefs(page).includes(ref), false, ref);
   }
+});
+
+test("once Vercel has the name, the site is called live only when it really answers there", async t => {
+  // A stand-in for the internet: the registry already shows Vercel, and the site answers from Vercel's servers after a while.
+  let asks = 0;
+  const answers = { from: 3 };
+  const fetchFn = async url => {
+    if (url === "https://data.iana.org/rdap/dns.json") return new Response(JSON.stringify({ services: [[["co"], ["https://rdap.example/"]]] }));
+    if (String(url).startsWith("https://rdap.example/")) return new Response(JSON.stringify({ nameservers: VERCEL.map(ldhName => ({ ldhName })) }));
+    if (url === "https://bakerysite.co/") {
+      asks++;
+      if (asks < answers.from) throw new Error("certificate not ready yet");
+      return new Response("<html>bakery</html>", { status: 200, headers: { server: "Vercel", "x-vercel-id": "iad1::abc" } });
+    }
+    return new Response("", { status: 404 });
+  };
+
+  // The real check, on its own: Vercel's servers count; anyone else's server, an error or no answer do not.
+  const d = { fetchFn: async () => new Response("", { status: 308, headers: { server: "Vercel" } }) };
+  assert.equal(await isLive("bakerysite.co", d), true, "a redirect from Vercel counts");
+  assert.equal(await isLive("bakerysite.co", { fetchFn: async () => new Response("", { status: 200, headers: { server: "nginx" } }) }), false);
+  assert.equal(await isLive("bakerysite.co", { fetchFn: async () => new Response("", { status: 502, headers: { server: "Vercel" } }) }), false);
+  assert.equal(await isLive("bakerysite.co", { fetchFn: async () => { throw new Error("no answer"); } }), false);
+  assert.equal(await waitForLive("bakerysite.co", { fetchFn, pollMs: 30000, liveMs: 60000, sleep: undefined, sleepInjected: false }), null, "a test without its own clock never waits");
+
+  // The whole step: Done, the record shows Vercel, Vercel attaches, and the site is checked until it answers.
+  const { notices, manifest, project, tools, deps } = domainSetup(t, {}, {});
+  Object.assign(deps, { fetchFn, pollMs: 1, liveMs: 60000 });
+  const done = await domainStep({ then: { type: "domain", step: "manual-done", project: "bakery-site", row: "P1", name: "bakerysite.co" }, value: "done", notices, manifest, deps });
+  assert.deepEqual(done, { ok: true, name: "bakerysite.co", verified: true });
+  assert.deepEqual(tools, ["vercel domains add bakerysite.co bakery-site", "vercel domains add www.bakerysite.co bakery-site"]);
+  assert.equal(await done.live, true);
+  assert.deepEqual(project.domain, { name: "bakerysite.co", state: "live" });
+  const live = notices.listOpen().find(n => n.text === "bakerysite.co is live: https://bakerysite.co");
+  assert.equal(live?.back, true, "the owner is called back to the chat");
+
+  // Never answering within the time: one card to look again, and nothing is called live.
+  const quiet = domainSetup(t, {}, {});
+  answers.from = Infinity;
+  Object.assign(quiet.deps, { fetchFn, pollMs: 1, liveMs: 5 });
+  const notYet = await domainStep({ then: { type: "domain", step: "manual-done", project: "bakery-site", row: "P1", name: "bakerysite.co" }, value: "done", notices: quiet.notices, manifest: quiet.manifest, deps: quiet.deps });
+  assert.equal(await notYet.live, false);
+  assert.deepEqual(quiet.project.domain, { name: "bakerysite.co", state: "pointed" });
+  const card = quiet.notices.listOpen().find(n => n.then?.step === "live");
+  assert.match(card.text, /is set up in Vercel, but the site is not answering there yet/);
+  // Check again, once it answers.
+  answers.from = 0;
+  const again = await domainStep({ then: card.then, value: "check", notices: quiet.notices, manifest: quiet.manifest, deps: quiet.deps });
+  assert.deepEqual([again.ok, again.live], [true, true]);
+  assert.equal(quiet.project.domain.state, "live");
+
+  // Vercel refuses to attach: Try again attaches again, and never sends an agent into Namecheap.
+  const refused = domainSetup(t, {}, {});
+  let attachTries = 0;
+  refused.deps.run = async (tool, args) => { refused.tools.push(`${tool} ${args.join(" ")}`); return { code: args[2] === "bakerysite.co" && ++attachTries === 1 ? 1 : 0, stdout: "", stderr: "" }; };
+  refused.deps.browserAgents = () => [claudeAgent];
+  refused.deps.browserRun = async () => assert.fail("no agent for a Vercel retry");
+  Object.assign(refused.deps, { fetchFn, pollMs: 1, liveMs: 5 });
+  await domainStep({ then: { type: "domain", step: "manual-done", project: "bakery-site", row: "P1", name: "bakerysite.co" }, value: "done", notices: refused.notices, manifest: refused.manifest, deps: refused.deps });
+  const blocked = refused.notices.listOpen().find(n => n.then?.step === "attach");
+  assert.ok(blocked, "the card attaches again");
+  const retried = await domainStep({ then: blocked.then, value: "retry", notices: refused.notices, manifest: refused.manifest, deps: refused.deps });
+  assert.equal(retried.ok, true);
+  assert.equal(attachTries, 2);
 });

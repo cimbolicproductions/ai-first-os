@@ -57,7 +57,7 @@ test("without Namecheap's API, an agent changes the nameservers in the owner's o
   // One plain line while it works, then the result. Nothing to type, no form.
   const texts = notices.listOpen().map(n => n.text);
   assert.ok(texts.includes("Claude Code is pointing bakerysite.co at bakery-site in your Chrome, where you are signed in to Namecheap. Nothing for you to do."));
-  assert.ok(texts.includes("bakerysite.co now points at bakery-site. It can take up to an hour to start working everywhere."));
+  assert.ok(texts.includes("bakerysite.co is set up for bakery-site in Vercel. I am checking that the site answers there; it can take up to an hour."));
   assert.equal(notices.listOpen().some(n => n.form === "namecheap"), false);
   assert.deepEqual(tools, ["vercel domains add bakerysite.co bakery-site", "vercel domains add www.bakerysite.co bakery-site"]);
   assert.deepEqual(project.domain, { name: "bakerysite.co", state: "pointed" });

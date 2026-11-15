@@ -163,7 +163,7 @@ test("find, pick, buy on Namecheap's page, connect once, and the name points at 
   assert.deepEqual(tools.map(x => x.line), ["vercel domains add bakerysite.co bakery-site", "vercel domains add www.bakerysite.co bakery-site"]);
   assert.ok(tools.every(x => x.cwd === project.path));
   assert.deepEqual(project.domain, { name: "bakerysite.co", state: "pointed" });
-  assert.ok(notices.listOpen().some(n => n.text === "bakerysite.co now points at bakery-site. It can take up to an hour to start working everywhere."));
+  assert.ok(notices.listOpen().some(n => n.text === "bakerysite.co is set up for bakery-site in Vercel. I am checking that the site answers there; it can take up to an hour."));
   assert.equal(notices.listOpen().some(n => n.form === "namecheap"), false);
 });
 
