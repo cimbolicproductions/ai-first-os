@@ -165,6 +165,36 @@ function createLocalBoard({ boardDir, routerName = "Router", now = () => new Dat
     });
   }
 
+  function queueState() {
+    return readState().queue || { paused: false, stopVersion: 0 };
+  }
+
+  function setQueuePaused(paused) {
+    return withLock(() => {
+      const state = readState();
+      const current = state.queue || { paused: false, stopVersion: 0 };
+      if (current.paused === paused) return current;
+      const queue = { paused, stopVersion: current.stopVersion + (paused ? 1 : 0) };
+      state.queue = queue;
+      saveState(state);
+      return queue;
+    });
+  }
+
+  function setPutAway(taskId, putAway) {
+    return withLock(() => {
+      const state = readState();
+      const row = state.rows.find(row => row.ID === taskId);
+      if (!row) throw Object.assign(new Error("Task missing"), { code: "TASK_MISSING" });
+      if (putAway && !["Waiting on User", "Done"].includes(row.Status)) {
+        throw Object.assign(new Error("Only tasks waiting on you or finished can be put away."), { code: "TASK_ACTIVE" });
+      }
+      state.meta ||= {};
+      state.meta[taskId] = { ...state.meta[taskId], putAway };
+      saveState(state);
+    });
+  }
+
   function listTasks({ status, to } = {}) {
     const state = readState();
     return state.rows
@@ -226,6 +256,7 @@ function createLocalBoard({ boardDir, routerName = "Router", now = () => new Dat
 
   function claimTaskLocked({ taskId, agent, assignTo = agent, meta, note, runId = crypto.randomBytes(4).toString("hex"), claimCode = crypto.randomBytes(6).toString("hex") }) {
     const state = readState();
+    if (state.queue?.paused) throw Object.assign(new Error("The queue is paused."), { code: "QUEUE_PAUSED" });
     const row = state.rows.find(r => r.ID === taskId);
     if (!row) throw Object.assign(new Error("Task missing"), { code: "TASK_MISSING" });
     if (row.Status === "Done") throw Object.assign(new Error("Task already done"), { code: "TASK_DONE" });
@@ -247,7 +278,7 @@ function createLocalBoard({ boardDir, routerName = "Router", now = () => new Dat
     row["Latest note"] = notes.filter(Boolean).join("\n");
     saveState(state);
     logActivity({ type: "started", row: taskId, to: assignTo, task: row.Task });
-    return { task: structuredClone(row), claimMarker: marker };
+    return { task: structuredClone(row), claimMarker: marker, stopVersion: state.queue?.stopVersion || 0 };
   }
 
   function updateByColumnName(input) {
@@ -280,6 +311,7 @@ function createLocalBoard({ boardDir, routerName = "Router", now = () => new Dat
       state.meta = state.meta || {};
       state.meta[taskId] = { ...state.meta[taskId], ...meta };
       if (columns.Status && columns.Status !== "In progress") delete state.meta[taskId].activeClaim;
+      if (columns.Status === "Open") delete state.meta[taskId].putAway;
     }
     const stamp = todayStr();
     if (note) {
@@ -307,6 +339,9 @@ function createLocalBoard({ boardDir, routerName = "Router", now = () => new Dat
     updateByColumnName,
     getMeta,
     setMeta,
+    queueState,
+    setQueuePaused,
+    setPutAway,
     listActivity,
     logActivity,
   };
