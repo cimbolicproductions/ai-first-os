@@ -285,7 +285,7 @@ function createLocalBoard({ boardDir, routerName = "Router", now = () => new Dat
     return withLock(() => updateByColumnNameLocked(input));
   }
 
-  function updateByColumnNameLocked({ taskId, agent, claimMarker, expectedReplyTurn, columns = {}, note, meta }) {
+  function updateByColumnNameLocked({ taskId, agent, claimMarker, expectedReplyTurn, columns = {}, note, meta, suggestedTitle }) {
     const state = readState();
     const row = state.rows.find(r => r.ID === taskId);
     if (!row) throw Object.assign(new Error("Task missing"), { code: "TASK_MISSING" });
@@ -307,9 +307,10 @@ function createLocalBoard({ boardDir, routerName = "Router", now = () => new Dat
       }
       row[key] = String(columns[key]);
     }
-    if (meta || columns.Status) {
+    if (meta || columns.Status || suggestedTitle) {
       state.meta = state.meta || {};
       state.meta[taskId] = { ...state.meta[taskId], ...meta };
+      if (suggestedTitle && !state.meta[taskId].displayTitle) state.meta[taskId].displayTitle = suggestedTitle;
       if (columns.Status && columns.Status !== "In progress") delete state.meta[taskId].activeClaim;
       if (columns.Status === "Open") delete state.meta[taskId].putAway;
     }

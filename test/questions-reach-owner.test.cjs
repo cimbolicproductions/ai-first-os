@@ -22,9 +22,9 @@ function setup(t) {
     ideology: { routerFunnel: "Muse" },
     roles: { orchestrator: "muse", builder: "claude", researcher: "antigravity", auditor: "codex" },
   };
-  const ask = (row, question) => dispatchBoardTask({
+  const ask = (row, question, title) => dispatchBoardTask({
     workspaceRoot: dir, board, manifest, notices, availability: { claude: true }, taskId: row.ID, projects: [],
-    runner: async () => ({ status: "Waiting on User", result: "clarify", question }),
+    runner: async () => ({ status: "Waiting on User", result: "clarify", question, displayTitle: title }),
   });
   return { dir, board, notices, manifest, ask };
 }
@@ -53,7 +53,7 @@ test("the organizer's question reaches the owner as a card, and a newer one repl
 test("an answer typed on the phone goes to the question it names, once", async t => {
   const { board, notices, manifest, ask } = setup(t);
   const row = queueOrganizerRequest({ board, manifest, task: "Can you build me a website that makes me money please" });
-  await ask(row, "How should the site make money?");
+  await ask(row, "How should the site make money?", "Build a revenue site");
   const queue = [];
   const sent = [];
   const link = createCloudLink({
@@ -68,7 +68,7 @@ test("an answer typed on the phone goes to the question it names, once", async t
   });
   // First the phone gets the card, marked as one answered in words.
   assert.equal(await link.tick(), true);
-  assert.ok(sent.some(([route, body]) => route === "notice" && body.notice.reply === true && body.notice.row === row.ID));
+  assert.ok(sent.some(([route, body]) => route === "notice" && body.notice.reply === true && body.notice.row === row.ID && body.notice.displayTitle === "Build a revenue site"));
   queue.push({ id: "r1", kind: "request", body: { text: `Reply for ${row.ID.toLowerCase()}: a local lead site`, to: null } });
   await link.tick();
   const meta = board.getMeta(row.ID);

@@ -70,6 +70,10 @@ test("a voice dump becomes separate board tasks, one owner each, and gated work 
   assert.equal(line({ status: "tasks", answer: "None.", tasks: [] }), null);
   assert.equal(line({ status: "tasks", answer: "Bad role.", tasks: [{ role: "owner", work: "A" }] }), null);
   assert.equal(line({ status: "tasks", answer: "Too many.", tasks: Array.from({ length: 9 }, () => ({ role: "builder", work: "A" })) }), null);
+  assert.equal(line({ status: "completed", answer: "Done.", title: "  Repair résumé import  " }).displayTitle, "Repair résumé import");
+  assert.equal(line({ status: "completed", answer: "Done.", title: "a".repeat(97) }).displayTitle, undefined);
+  assert.equal(line({ status: "completed", answer: "Done.", title: "Line\nBreak" }).status, "Done");
+  assert.equal(line({ status: "tasks", answer: "One.", tasks: [{ role: "builder", work: "Long request", title: "Fix login" }] }).split[0].displayTitle, "Fix login");
 });
 
 test("a temporary failure retries on its own, then asks only when it keeps failing", async t => {

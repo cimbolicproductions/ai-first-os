@@ -301,6 +301,17 @@ const { buildManifestFromProfile } = require("../bin/aios.cjs");
 const { HARNESSES, findHarness, laneList, buildSpawnPlan } = require("../lib/harness-registry.cjs");
 const { detectInstalledAgents } = require("../lib/agent-auth.cjs");
 const { DEFAULT_SLATE, buildRoleSlate, routeTask, pickAuditor } = require("../lib/roles.cjs");
+
+test("connected personal organizers can organize but cannot run build or audit work", () => {
+  const manifest = { roles: { orchestrator: "muse", builder: "claude", auditor: "grokbot" },
+    priorities: { builder: ["muse", "codex", "claude"] } };
+  const availability = { muse: true, grokbot: true, claude: true, codex: true };
+  assert.equal(routeTask({ assigned: "muse", manifest, availability, role: "orchestrator" }).agent, "muse");
+  assert.equal(routeTask({ assigned: "muse", manifest, availability, role: "builder" }).agent, "codex");
+  assert.equal(routeTask({ assigned: "grokbot", manifest, availability, role: "auditor" }).agent, "claude");
+  assert.equal(pickAuditor({ builder: "claude", manifest, availability }).agent, "codex");
+  assert.equal(pickAuditor({ builder: "claude", manifest, availability: { muse: true, grokbot: true } }).agent, null);
+});
 const { createNoticeBook } = require("../lib/notices.cjs");
 const { auditOffers, requestAudit } = require("../lib/audit-loop.cjs");
 const { answerNotice, parseAgentReport, defaultCliRunner, buildWorkOrderPrompt } = require("../lib/os-runtime.cjs");

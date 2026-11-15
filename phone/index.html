@@ -348,6 +348,11 @@
   function noticeCard(n) {
     const card = document.createElement("div");
     card.className = "notice";
+    if (typeof n.displayTitle === "string" && n.displayTitle) {
+      const title = document.createElement("strong");
+      title.textContent = n.displayTitle;
+      card.append(title);
+    }
     const p = document.createElement("p");
     p.textContent = n.text;
     card.append(p);
