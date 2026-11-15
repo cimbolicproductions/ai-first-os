@@ -79,14 +79,14 @@ test("a free agent is one more entry: no account, a free model picked from its o
   const spec = findHarness("opencode");
   assert.equal(spec.free, true);
   assert.equal(findHarness("deepseek").id, "opencode", "asking for DeepSeek by name lands on the agent that runs it for free");
-  assert.deepEqual(spec.run.args({ mode: "write", model: null }), ["run", "--agent", "build", "-m", DEFAULT_FREE_MODEL]);
+  assert.deepEqual(spec.run.args({ mode: "write", model: null }), ["run", "--agent", "build", "--auto", "-m", DEFAULT_FREE_MODEL]);
   assert.deepEqual(spec.run.args({ mode: "write", model: null, cwd: "C:\\site" }).slice(0, 3), ["run", "--dir", "C:\\site"], "its working folder is named outright");
   assert.equal(plainLine("← Write C:/Users/someone/site/hello.txt"), "Writing hello.txt");
   assert.equal(plainLine("$ npm test --token=abc"), null, "a line with a secret word is dropped whole");
   assert.equal(plainLine("$ npm run build"), "Running npm");
   assert.equal(plainLine("ERROR codex_models_manager::cache: failed to load models cache"), null);
   assert.equal(plainLine("> build · deepseek-v4.1-flash-free"), null);
-  assert.deepEqual(spec.run.args({ mode: "read", model: "opencode/glm-5.3-flash-free" }), ["run", "--agent", "plan", "-m", "opencode/glm-5.3-flash-free"]);
+  assert.deepEqual(spec.run.args({ mode: "read", model: "opencode/glm-5.3-flash-free" }), ["run", "--agent", "plan", "--auto", "-m", "opencode/glm-5.3-flash-free"]);
   assert.equal(spec.run.promptVia, "stdin");
 
   // DeepSeek first, only free ones, and never one whose maker may learn from what is sent.

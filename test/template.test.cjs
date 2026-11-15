@@ -604,7 +604,7 @@ test("11. work reaches agents without a shell, and silent auth failures are caug
   assert.equal(ok.status, "Done");
   assert.equal(seen.stdin, secretText);
   assert.equal(seen.args.some(a => a.includes("SECRET")), false);
-  assert.ok(seen.args.includes("acceptEdits"));
+  assert.ok(seen.args.includes("bypassPermissions"));
 
   const readOnly = {};
   await defaultCliRunner({ agent: "codex", prompt: "p", cwd: dir, task, mode: "read", detect, spawnFn: fakeSpawn("ok", 0, readOnly) });
