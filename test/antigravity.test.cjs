@@ -44,6 +44,10 @@ test("the purchase check answers Antigravity's hook: buying denied, the app's ow
   assert.equal(antigravityDecision(call("echo vercel domains buy example.com"), { AIOS_AGY_WORKER: "1" }).decision, "deny");
   assert.equal(antigravityDecision(call("npm install"), { AIOS_AGY_WORKER: "1" }).decision, "auto_approve");
   assert.equal(antigravityDecision(JSON.stringify({ toolCall: { name: "write_file", args: {} } }), { AIOS_AGY_WORKER: "1" }).decision, "auto_approve");
+  // Anything that is not one of the five build tools (a connected service, a browser) is never auto-approved.
+  for (const name of ["mcp_stripe_create_charge", "browser_subagent", "send_email", "anything_else"]) {
+    assert.equal(antigravityDecision(JSON.stringify({ toolCall: { name, args: {} } }), { AIOS_AGY_WORKER: "1" }).decision, "allow", name);
+  }
   // In the owner's own Antigravity sessions, only buying is refused; everything else follows their usual rules.
   assert.equal(antigravityDecision(call("npm install"), {}).decision, "allow");
   assert.equal(antigravityDecision(call("vercel domains buy example.com"), {}).decision, "deny");

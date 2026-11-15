@@ -92,7 +92,8 @@ test("Claude Code gets the purchase check on every run, and Codex works without 
     detect: () => [{ id: "claude", workerPath: process.platform === "win32" ? "C:\\bin\\claude.exe" : "/bin/claude" }],
   });
   assert.ok(settingsFile, "the run named a settings file");
-  assert.deepEqual(settings, claudeSettings());
+  // A writing run carries both checks: the purchase check on commands, and the block on connected services.
+  assert.deepEqual(settings, claudeSettings({ blockConnectors: true }));
   assert.equal(fs.existsSync(settingsFile), false, "the file is gone once the run ends");
 
   const codex = findHarness("codex").run.args({ mode: "write" });

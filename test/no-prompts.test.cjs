@@ -19,6 +19,11 @@ test("background agents never wait on a prompt, and the buying checks stay attac
   assert.match(JSON.stringify(claude.settings()), /no-purchase\.cjs/);
   const read = claude.args({ mode: "read" });
   assert.equal(read[read.indexOf("--permission-mode") + 1], "plan");
+  // With prompts off, connected services (mail, payments, hosting, databases) are refused before they run.
+  const writeHooks = claude.settings({ mode: "write" }).hooks.PreToolUse;
+  assert.deepEqual(writeHooks.map(h => h.matcher), ["Bash|PowerShell", "mcp__.*"]);
+  assert.match(writeHooks[1].hooks[0].command, /no-purchase\.cjs" --connector$/);
+  assert.deepEqual(claude.settings({ mode: "read" }).hooks.PreToolUse.map(h => h.matcher), ["Bash|PowerShell"]);
 
   const opencode = findHarness("opencode").run;
   for (const mode of ["write", "read"]) assert.ok(opencode.args({ mode, cwd: "C:/work" }).includes("--auto"));
