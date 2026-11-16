@@ -60,6 +60,7 @@ test("the hook is added beside the owner's other hooks, once, and never over a f
   const file = path.join(home, ".gemini", "config", "hooks.json");
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, "\uFEFF" + JSON.stringify({ "owners-own": { PreToolUse: [] } }));
+  assert.equal(ensureAntigravityGuard({ home, repairOnly: true }), false);
   assert.equal(ensureAntigravityGuard({ home, node: "C:/Program Files/nodejs/node.exe", script: "C:/app/lib/no-purchase.cjs" }), true);
   const saved = JSON.parse(fs.readFileSync(file, "utf8"));
   assert.deepEqual(Object.keys(saved).sort(), ["ai-first-os-no-purchase", "owners-own"]);
@@ -67,6 +68,10 @@ test("the hook is added beside the owner's other hooks, once, and never over a f
   const before = fs.readFileSync(file, "utf8");
   assert.equal(ensureAntigravityGuard({ home, node: "C:/Program Files/nodejs/node.exe", script: "C:/app/lib/no-purchase.cjs" }), true);
   assert.equal(fs.readFileSync(file, "utf8"), before);
+  assert.equal(ensureAntigravityGuard({ home, repairOnly: true, node: "C:/node.exe", script: "C:/moved/lib/no-purchase.cjs" }), true);
+  const moved = JSON.parse(fs.readFileSync(file, "utf8"));
+  assert.deepEqual(moved["owners-own"], saved["owners-own"]);
+  assert.equal(moved["ai-first-os-no-purchase"].PreToolUse[0].hooks[0].command, '"C:/node.exe" "C:/moved/lib/no-purchase.cjs" --agy');
 
   fs.writeFileSync(file, "{ broken");
   assert.equal(ensureAntigravityGuard({ home, node: "C:/node.exe", script: "C:/app/lib/no-purchase.cjs" }), false);
