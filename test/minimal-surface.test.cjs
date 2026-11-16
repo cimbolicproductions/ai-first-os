@@ -49,12 +49,13 @@ test("the desktop leaves Sheet controls out until a Sheet is connected", async t
   assert.match(plain.html, /id="addSheetTasksBtn" hidden/);
   assert.match(plain.html, /id="sheetTasksBtn" hidden/);
   assert.match(plain.html, /Say it or type it\./);
-  // The minimalist header is the brand and one toggle. Everything else waits behind it.
-  assert.match(plain.html, /<button id="modeBtn"[^>]*>Detailed<\/button>/);
+  // Settings are available from More while the queue control stays in the header.
+  assert.match(plain.html, /id="settingsOpen" aria-label="More"/);
+  assert.match(plain.html, /id="modeBtn"[^>]*>Advanced view<\/button>/);
   for (const id of ["routerBadge", "agentsBtn", "phoneBtn"]) assert.ok(plain.html.includes(`advanced-only" id="${id}"`), id);
   assert.doesNotMatch(plain.html, /id="boardToggle"|id="viewTabs"/);
   assert.match(plain.html, /id="everythingBtn">Everything</);
-  assert.ok(plain.html.includes('state.advanced ? "Minimalist" : "Detailed"'));
+  assert.ok(plain.html.includes('state.advanced ? "Focus view" : "Advanced view"'));
 
   const withSheet = await serve({ configured: true });
   assert.equal(withSheet.state.sheetConnected, true);

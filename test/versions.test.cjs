@@ -122,6 +122,6 @@ test("the note box, the switch and the single screen are there in the app", asyn
   assert.deepEqual([(await state()).crew.keepGoing, saved], [false, 1]);
 
   const html = await (await fetch(base)).text();
-  assert.match(html, /<button id="modeBtn" aria-pressed="false" hidden>/, "there is no detailed view to switch to");
+  assert.match(html, /id="modeBtn" aria-pressed="false">Advanced view</, "the detailed view is available in More");
   assert.match(html, /Don’t stop till it’s done/);
 });
