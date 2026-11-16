@@ -9,6 +9,7 @@ const { createLocalBoard } = require("../adapters/local-board.cjs");
 const { createDesktopServer } = require("../lib/desktop-hud.cjs");
 const { nextForOwner, pickFocus } = require("../lib/focus.cjs");
 const { createNoticeBook } = require("../lib/notices.cjs");
+const { dispatchBoardTask } = require("../lib/os-runtime.cjs");
 
 const now = Date.parse("2026-11-15T21:00:00Z");
 const minutesAgo = minutes => new Date(now - minutes * 60_000).toISOString();
@@ -103,4 +104,55 @@ test("desktop focus is local, validated, durable, and leaves the board and runne
   assert.deepEqual(await restarted.post(null), { status: 200, ok: true, focus: null });
   assert.equal(await (await start()).state(), null);
   assert.equal(fs.readFileSync(board.jsonPath, "utf8"), boardBefore);
+});
+
+test("notes follow their request, and an external action gets its own approval", async t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "aios-focus-note-"));
+  const board = createLocalBoard({ boardDir: dir });
+  const notices = createNoticeBook({ dir });
+  const manifest = { roles: { builder: "codex", orchestrator: "codex" } };
+  board.initBoard([], { empty: true });
+  const queued = board.addTask({ task: "Build the fixture", to: "codex" });
+  const finished = board.addTask({ task: "Read the existing fixture" });
+  board.updateByColumnName({ taskId: finished.ID, agent: "Router", columns: { Status: "Done" }, meta: { answer: "Original answer." } });
+  const server = createDesktopServer({ manifest, board, notices, workspaceRoot: dir, detect: () => [] });
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  t.after(async () => {
+    await new Promise(resolve => server.close(resolve));
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  const post = async (route, body) => fetch(origin + route, {
+    method: "POST", headers: { origin, "content-type": "application/json" }, body: JSON.stringify(body),
+  }).then(response => response.json());
+  await post("/api/focus", { taskId: queued.ID });
+  assert.equal((await post("/api/note", { taskId: finished.ID, text: "Wrong focus", mode: "finished" })).ok, false);
+  assert.equal((await post("/api/note", { taskId: queued.ID, text: "x".repeat(4001), mode: "later" })).ok, false);
+  assert.equal((await post("/api/note", { taskId: queued.ID, text: "Use the sample data", mode: "later" })).ok, true);
+  const gated = await post("/api/note", { taskId: queued.ID, text: "Also publish it", mode: "later" });
+  assert.equal(board.getMeta(gated.followUp.ID).intent, "external_action");
+  assert.equal(board.getMeta(gated.followUp.ID).followUpOf, queued.ID);
+  await dispatchBoardTask({ workspaceRoot: dir, manifest, board, notices, taskId: gated.followUp.ID,
+    runner: () => assert.fail("A gated note started a worker") });
+  assert.ok(notices.listOpen().some(notice => notice.kind === "approval" && notice.row === gated.followUp.ID));
+
+  await dispatchBoardTask({ workspaceRoot: dir, manifest, board, notices, taskId: queued.ID, runner: async ({ prompt }) => {
+    assert.match(prompt, /Use the sample data/);
+    assert.doesNotMatch(prompt, /Also publish it/);
+    assert.equal((await post("/api/note", { taskId: queued.ID, text: "Keep this for later", mode: "later" })).ok, true);
+    return { status: "Done", note: "Built the fixture." };
+  } });
+  assert.equal(board.findTask(queued.ID).Task, queued.Task);
+  assert.deepEqual(board.getMeta(queued.ID).ownerNotes, ["Keep this for later"]);
+
+  await post("/api/focus", { taskId: finished.ID });
+  const follow = await post("/api/note", { taskId: finished.ID, text: "What did you conclude?", mode: "finished" });
+  assert.equal(board.getMeta(follow.followUp.ID).followUpOf, finished.ID);
+  let seenPrompt = "";
+  await dispatchBoardTask({ workspaceRoot: dir, manifest, board, notices, taskId: follow.followUp.ID, runner: async ({ prompt }) => {
+    seenPrompt = prompt;
+    return { status: "Done", note: "Answered." };
+  } });
+  assert.match(seenPrompt, /Read the existing fixture/);
+  assert.match(seenPrompt, /Original answer/);
 });

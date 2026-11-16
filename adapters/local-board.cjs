@@ -278,6 +278,22 @@ function createLocalBoard({ boardDir, routerName = "Router", now = () => new Dat
     });
   }
 
+  function addOwnerNote(taskId, note, statuses) {
+    return withLock(() => {
+      const state = readState();
+      const row = state.rows.find(row => row.ID === taskId);
+      const meta = state.meta?.[taskId] || {};
+      if (!row || !statuses.includes(row.Status) || meta.putAway || meta.awaitingReply) {
+        throw Object.assign(new Error("This request has moved on. Check its current status."), { code: "TASK_NOT_OPEN" });
+      }
+      const notes = meta.ownerNotes || [];
+      if (notes.length >= 20) throw new Error("This request already has 20 notes waiting for its next step.");
+      state.meta ||= {};
+      state.meta[taskId] = { ...meta, ownerNotes: [...notes, note] };
+      saveState(state);
+    });
+  }
+
   function claimTaskLocked({ taskId, agent, assignTo = agent, meta, note, runId = crypto.randomBytes(4).toString("hex"), claimCode = crypto.randomBytes(6).toString("hex") }) {
     const state = readState();
     if (state.queue?.paused) throw Object.assign(new Error("The queue is paused."), { code: "QUEUE_PAUSED" });
@@ -303,14 +319,15 @@ function createLocalBoard({ boardDir, routerName = "Router", now = () => new Dat
     row["Latest note"] = notes.filter(Boolean).join("\n");
     saveState(state);
     logActivity({ type: "started", row: taskId, to: assignTo, task: row.Task });
-    return { task: structuredClone(row), claimMarker: marker, stopVersion: state.queue?.stopVersion || 0 };
+    return { task: structuredClone(row), claimMarker: marker, stopVersion: state.queue?.stopVersion || 0,
+      ownerNotes: structuredClone(state.meta[taskId].ownerNotes || []) };
   }
 
   function updateByColumnName(input) {
     return withLock(() => updateByColumnNameLocked(input));
   }
 
-  function updateByColumnNameLocked({ taskId, agent, claimMarker, expectedReplyTurn, columns = {}, note, meta, suggestedTitle }) {
+  function updateByColumnNameLocked({ taskId, agent, claimMarker, expectedReplyTurn, columns = {}, note, meta, suggestedTitle, usedOwnerNotes = [] }) {
     const state = readState();
     const row = state.rows.find(r => r.ID === taskId);
     if (!row) throw Object.assign(new Error("Task missing"), { code: "TASK_MISSING" });
@@ -335,6 +352,10 @@ function createLocalBoard({ boardDir, routerName = "Router", now = () => new Dat
     if (meta || columns.Status || suggestedTitle) {
       state.meta = state.meta || {};
       state.meta[taskId] = { ...state.meta[taskId], ...meta };
+      const notes = state.meta[taskId].ownerNotes;
+      if (usedOwnerNotes.length && notes && usedOwnerNotes.every((value, index) => value === notes[index])) {
+        state.meta[taskId].ownerNotes = notes.slice(usedOwnerNotes.length);
+      }
       if (suggestedTitle && !state.meta[taskId].displayTitle) state.meta[taskId].displayTitle = suggestedTitle;
       if (columns.Status && columns.Status !== "In progress") delete state.meta[taskId].activeClaim;
       if (columns.Status === "Open") delete state.meta[taskId].putAway;
@@ -369,6 +390,7 @@ function createLocalBoard({ boardDir, routerName = "Router", now = () => new Dat
     setQueuePaused,
     setPutAway,
     stopTask,
+    addOwnerNote,
     listActivity,
     logActivity,
   };
