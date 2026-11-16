@@ -42,6 +42,8 @@
   .sign-in { display:block; text-align:center; margin-top:12px; padding:13px 18px; border-radius:12px; background:var(--text); color:var(--bg); font-weight:600; text-decoration:none; }
   .choices { display:flex; gap:8px; margin-top:12px; flex-wrap:wrap; }
   .choices button { flex:1 1 40%; }
+  #phoneCardNav { align-items:center; justify-content:space-between; color:var(--muted); font-size:14px; }
+  #phoneCardNav button { flex:none; }
   #today { color:var(--muted); }
   #alerts { width:100%; margin-top:24px; }
   #nolink { margin:30vh 0; text-align:center; color:var(--muted); }
@@ -89,8 +91,14 @@
       </div>
     </form>
   </section>
-  <section id="waitingWrap" hidden><h2>Waiting on you</h2><div id="waiting"></div></section>
-  <section id="updatesWrap" hidden><h2>Updates</h2><div id="updates"></div></section>
+  <section id="waitingWrap" hidden>
+    <h2 id="phoneCardTitle">Waiting on you</h2>
+    <div id="waiting"></div>
+    <div class="choices" id="phoneCardNav" hidden>
+      <span id="phoneCardPosition" aria-live="polite"></span>
+      <button type="button" id="phoneCardNext" class="soft">Next</button>
+    </div>
+  </section>
   <h2>Today</h2>
   <p id="today">Nothing yet.</p>
   <button id="alerts" class="soft" hidden>Turn on alerts</button>
@@ -114,8 +122,10 @@
 
   let vapidKey = null;
   let sending = false;
-  let lastAsks = "";
-  let lastInfo = "";
+  let phoneCards = [];
+  let phoneCardId = null;
+  let renderedCardKey = "";
+  const cardDrafts = new Map();
   const answered = new Set();
   const pendingKey = "aios-sheet-request:" + backend;
   let sheetAvailable = false;
@@ -348,6 +358,7 @@
   function noticeCard(n) {
     const card = document.createElement("div");
     card.className = "notice";
+    const key = cardKey(n);
     if (typeof n.displayTitle === "string" && n.displayTitle) {
       const title = document.createElement("strong");
       title.textContent = n.displayTitle;
@@ -373,6 +384,8 @@
       box.rows = 3;
       box.maxLength = 3900;
       box.placeholder = "Your answer";
+      box.value = cardDrafts.get(key) || "";
+      box.oninput = () => cardDrafts.set(key, box.value);
       const send = document.createElement("button");
       send.textContent = "Send answer";
       send.onclick = async () => {
@@ -382,7 +395,7 @@
         try {
           await call("POST", "request", { text: "Reply for " + n.row + ": " + words });
           answered.add(n.id);
-          card.remove();
+          removePhoneCard(n.id);
           say("Answer sent.");
           refresh();
         } catch (err) {
@@ -397,12 +410,14 @@
       const open = document.createElement("button");
       open.className = "soft note-open";
       open.textContent = "Add a note";
-      open.onclick = () => {
+      function showNote(focus) {
         const box = document.createElement("textarea");
         box.className = "note-box";
         box.rows = 2;
         box.maxLength = 3900;
         box.placeholder = "What should change in the next version?";
+        box.value = cardDrafts.get(key) || "";
+        box.oninput = () => cardDrafts.set(key, box.value);
         const send = document.createElement("button");
         send.textContent = "Send note";
         send.onclick = async () => {
@@ -411,7 +426,8 @@
           send.disabled = true;
           try {
             await call("POST", "request", { text: "Note for " + n.row + ": " + words });
-            box.remove();
+            cardDrafts.delete(key);
+            box.replaceWith(open);
             send.remove();
             say("Note sent.");
             refresh();
@@ -421,9 +437,11 @@
           }
         };
         open.replaceWith(box, send);
-        box.focus();
-      };
+        if (focus) box.focus();
+      }
+      open.onclick = () => showNote(true);
       card.append(open);
+      if (cardDrafts.has(key)) showNote(false);
     }
     // Short values to paste somewhere else, such as two nameservers.
     const copies = (Array.isArray(n.copy) ? n.copy : []).filter(v => typeof v === "string" && /^[a-z0-9.-]{1,100}$/i.test(v)).slice(0, 4);
@@ -464,7 +482,7 @@
           try {
             await call("POST", "answer", { noticeId: n.id, digest: n.digest, value: c.value });
             answered.add(n.id);
-            card.remove();
+            removePhoneCard(n.id);
             say("Got it.");
             refresh();
           } catch (err) {
@@ -479,6 +497,38 @@
     return card;
   }
 
+  const waitsOnYou = notice => Boolean(notice.choices?.length || notice.reply);
+  const cardKey = notice => notice.id + "@" + (notice.digest || notice.created || "");
+
+  function renderPhoneCard() {
+    const index = Math.max(0, phoneCards.findIndex(notice => notice.id === phoneCardId));
+    const notice = phoneCards[index];
+    phoneCardId = notice?.id ?? null;
+    $("waitingWrap").hidden = !notice;
+    $("phoneCardNav").hidden = phoneCards.length < 2;
+    const key = notice ? cardKey(notice) : "";
+    if (key !== renderedCardKey) {
+      renderedCardKey = key;
+      $("waiting").replaceChildren(...(notice ? [noticeCard(notice)] : []));
+    }
+    if (notice) $("phoneCardTitle").textContent = waitsOnYou(notice) ? "Waiting on you" : "Update";
+    const position = phoneCards.length > 1 ? (index + 1) + " of " + phoneCards.length : "";
+    if ($("phoneCardPosition").textContent !== position) $("phoneCardPosition").textContent = position;
+  }
+
+  function removePhoneCard(id) {
+    const current = phoneCards.find(notice => notice.id === id);
+    if (current) cardDrafts.delete(cardKey(current));
+    phoneCards = phoneCards.filter(notice => notice.id !== id);
+    renderPhoneCard();
+  }
+
+  $("phoneCardNext").onclick = () => {
+    const index = phoneCards.findIndex(notice => notice.id === phoneCardId);
+    phoneCardId = phoneCards[(index + 1) % phoneCards.length]?.id ?? null;
+    renderPhoneCard();
+  };
+
   async function refresh() {
     try {
       const s = await call("GET", "status");
@@ -489,18 +539,12 @@
         ? "Home computer online"
         : "Home computer offline" + (s.queued ? " · " + s.queued + " waiting for it" : " · requests will wait for it");
       const open = s.notices.filter(n => !answered.has(n.id));
-      const waitsOnYou = n => (n.choices && n.choices.length) || n.reply === true;
-      const asks = open.filter(waitsOnYou);
-      const info = open.filter(n => !waitsOnYou(n));
-      $("waitingWrap").hidden = !asks.length;
-      const askKey = asks.map(n => n.id).join();
-      // Left alone while an answer is being typed.
-      const typing = [...document.querySelectorAll(".reply-box")].some(box => box.value.trim());
-      if (askKey !== lastAsks && !typing) { lastAsks = askKey; $("waiting").replaceChildren(...asks.map(noticeCard)); }
-      $("updatesWrap").hidden = !info.length;
-      // Left alone while a note is being written, so the box does not vanish mid-sentence.
-      const infoKey = info.slice(-5).map(n => n.id).join();
-      if (infoKey !== lastInfo && !document.querySelector(".note-box")) { lastInfo = infoKey; $("updates").replaceChildren(...info.slice(-5).reverse().map(noticeCard)); }
+      const asks = open.filter(waitsOnYou).sort((a, b) => (Date.parse(a.created) || 0) - (Date.parse(b.created) || 0));
+      const updates = open.filter(n => !waitsOnYou(n)).slice(-5).reverse();
+      phoneCards = [...asks, ...updates];
+      const openKeys = new Set(phoneCards.map(cardKey));
+      for (const key of cardDrafts.keys()) if (!openKeys.has(key)) cardDrafts.delete(key);
+      renderPhoneCard();
       $("today").textContent = s.summary ? s.summary.headline : "Nothing yet.";
       vapidKey = s.vapidKey;
       $("alerts").hidden = !vapidKey || !("PushManager" in window) || (window.Notification && Notification.permission === "granted");

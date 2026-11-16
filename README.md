@@ -58,7 +58,7 @@ node bin/aios.cjs desktop
 
 **Purchases are handled by you.** The app never buys anything. Claude Code and Antigravity use a command hook, and OpenCode uses a deny list. These checks cover recognized purchase commands and can miss purchases made through other commands or scripts. Codex background builds have shell networking and account apps disabled. Keep saved payment methods and credentials with spending privileges out of the accounts available to background agents.
 
-**Your phone is the front door.** When something is waiting on you, the question has **Answer from your phone**. Tap it, sign in once, and point your phone's camera at the code that appears. You can also open it any time from **Phone**. Send requests from anywhere. Questions come back with one-tap answers, or a box to type your answer when it needs words. The phone shows honestly whether your computer is online, and requests wait for it if it is not.
+**Your phone is the front door.** On the desktop, open **More → Phone** and scan the code with your phone. Send requests from anywhere. The phone starts with the oldest question waiting for you and shows one card at a time. Tap **Next** to see the others. The phone shows whether your computer is online, and requests wait for it when it is offline.
 
 **Notes work from your phone.** An update about a finished build has **Add a note**. What you write goes into the next version, the same as a note typed on the computer.
 
