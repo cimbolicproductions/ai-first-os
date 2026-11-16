@@ -100,6 +100,7 @@ test("the board shows the live line while a task runs, and clears it when the ta
   assert.deepEqual(await view(), {});
 
   const html = await (await fetch(base)).text();
-  for (const tab of ["chat", "coding", "research", "tasks"]) assert.match(html, new RegExp(`data-view="${tab}"`));
-  assert.match(html, /Get to work/);
+  assert.match(html, /id="focusStatus"/);
+  assert.match(html, /last sign of life/i);
+  assert.match(html, /Start now/);
 });
