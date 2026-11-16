@@ -83,27 +83,43 @@ test("desktop focus is local, validated, durable, and leaves the board and runne
       });
       return { status: response.status, ...(await response.json()) };
     };
-    return { state, post };
+    const answer = async (notice, digest = notice.digest) => {
+      const response = await fetch(base + "/api/answer", {
+        method: "POST",
+        headers: { origin: base, "content-type": "application/json" },
+        body: JSON.stringify({ noticeId: notice.id, digest, value: "no" }),
+      });
+      return { status: response.status, ...(await response.json()) };
+    };
+    return { state, post, answer };
   }
 
   const first = await start();
   assert.equal(await first.state(), queued.ID);
-  notices.raise({ row: asking.ID, kind: "approval", text: "Approve this fixture?" });
+  const approval = notices.raise({ row: asking.ID, kind: "approval", text: "Approve this fixture?",
+    choices: [{ label: "No", value: "no" }] });
   assert.equal(await first.state(), queued.ID);
+  assert.deepEqual(await first.answer(approval), { status: 409, ok: false, error: "Open that request first." });
+  assert.equal(notices.get(approval.id).answer, null);
+  const signIn = notices.raise({ kind: "question", text: "Open this setup fixture?", choices: [{ label: "No", value: "no" }] });
+  assert.equal((await first.answer(signIn)).status, 200);
   assert.equal((await first.post(asking.ID, "https://other.example")).status, 403);
   for (const invalid of ["P999", hidden.ID, 3, undefined]) assert.equal((await first.post(invalid)).status, 400);
   assert.equal(fs.existsSync(file), false);
 
   assert.deepEqual(await first.post(asking.ID), { status: 200, ok: true, focus: asking.ID });
+  assert.equal((await first.answer(approval, "outdated")).status, 409);
+  assert.equal(notices.get(approval.id).answer, null);
   const saved = JSON.parse(fs.readFileSync(file, "utf8"));
   assert.deepEqual(Object.keys(saved), ["focus", "at"]);
   assert.equal(saved.focus, asking.ID);
   assert.ok(Number.isFinite(Date.parse(saved.at)));
   const restarted = await start();
   assert.equal(await restarted.state(), asking.ID);
+  assert.equal(fs.readFileSync(board.jsonPath, "utf8"), boardBefore);
+  assert.equal((await restarted.answer(approval)).status, 200);
   assert.deepEqual(await restarted.post(null), { status: 200, ok: true, focus: null });
   assert.equal(await (await start()).state(), null);
-  assert.equal(fs.readFileSync(board.jsonPath, "utf8"), boardBefore);
 });
 
 test("notes follow their request, and an external action gets its own approval", async t => {
