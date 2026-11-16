@@ -186,8 +186,8 @@ function createLocalBoard({ boardDir, routerName = "Router", now = () => new Dat
       const state = readState();
       const row = state.rows.find(row => row.ID === taskId);
       if (!row) throw Object.assign(new Error("Task missing"), { code: "TASK_MISSING" });
-      if (putAway && !["Waiting on User", "Done"].includes(row.Status)) {
-        throw Object.assign(new Error("Only tasks waiting on you or finished can be put away."), { code: "TASK_ACTIVE" });
+      if (putAway && row.Status === "In progress") {
+        throw Object.assign(new Error("Stop this request before putting it away."), { code: "TASK_ACTIVE" });
       }
       state.meta ||= {};
       state.meta[taskId] = { ...state.meta[taskId], putAway };
@@ -266,6 +266,18 @@ function createLocalBoard({ boardDir, routerName = "Router", now = () => new Dat
     return withLock(() => claimTaskLocked(input));
   }
 
+  function stopTask(taskId, startedAt) {
+    return withLock(() => {
+      const state = readState();
+      const row = state.rows.find(row => row.ID === taskId);
+      const meta = state.meta?.[taskId];
+      if (row?.Status !== "In progress" || !meta?.activeClaim || !startedAt || startedAt !== meta.startedAt) return false;
+      meta.stopRequestedAt = new Date(now()).getTime();
+      saveState(state);
+      return true;
+    });
+  }
+
   function claimTaskLocked({ taskId, agent, assignTo = agent, meta, note, runId = crypto.randomBytes(4).toString("hex"), claimCode = crypto.randomBytes(6).toString("hex") }) {
     const state = readState();
     if (state.queue?.paused) throw Object.assign(new Error("The queue is paused."), { code: "QUEUE_PAUSED" });
@@ -274,6 +286,7 @@ function createLocalBoard({ boardDir, routerName = "Router", now = () => new Dat
     if (row.Status === "Done") throw Object.assign(new Error("Task already done"), { code: "TASK_DONE" });
     if (row.Status === "In progress") throw Object.assign(new Error(`${taskId} is already running.`), { code: "TASK_BUSY" });
     if (row.Status !== "Open") throw Object.assign(new Error("Answer the pending question first."), { code: "TASK_NOT_OPEN" });
+    if (state.meta?.[taskId]?.putAway) throw Object.assign(new Error("Restore the request first."), { code: "TASK_NOT_OPEN" });
     if (row.To.toLowerCase() !== String(agent).toLowerCase()) {
       throw Object.assign(new Error(`Row ${taskId} is assigned to ${row.To}, not ${agent}`), { code: "NOT_OWNER" });
     }
@@ -355,6 +368,7 @@ function createLocalBoard({ boardDir, routerName = "Router", now = () => new Dat
     queueState,
     setQueuePaused,
     setPutAway,
+    stopTask,
     listActivity,
     logActivity,
   };

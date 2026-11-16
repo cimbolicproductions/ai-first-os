@@ -70,6 +70,12 @@ test("stopping interrupts a managed run and pauses both dispatch paths until res
 test("putting a request away is reversible and changes no task columns", async t => {
   const { board, boardDir, post } = await setup(t);
   const row = board.addTask({ task: "Build a sample page", to: "claude" });
+  assert.equal((await post("/api/put-away", { taskId: row.ID, putAway: true })).ok, true);
+  assert.deepEqual(board.findTask(row.ID), row);
+  assert.equal((await post("/api/run", { taskId: row.ID })).reason, "TASK_NOT_OPEN");
+  assert.throws(() => board.claimTask({ taskId: row.ID, agent: "claude" }), { code: "TASK_NOT_OPEN" });
+  assert.equal((await post("/api/put-away", { taskId: row.ID, putAway: false })).ok, true);
+  board.claimTask({ taskId: row.ID, agent: "claude" });
   assert.equal((await post("/api/put-away", { taskId: row.ID, putAway: true })).code, "TASK_ACTIVE");
   const waiting = board.updateByColumnName({ taskId: row.ID, agent: "Muse", columns: { Status: "Waiting on User" } });
   assert.equal((await post("/api/put-away", { taskId: row.ID, putAway: true })).ok, true);
