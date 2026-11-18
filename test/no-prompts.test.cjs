@@ -32,8 +32,9 @@ test("background agents never wait on a prompt, and the buying checks stay attac
   // Codex keeps its no-internet sandbox, which is its buying block, and is told how to ask for the web.
   const codex = findHarness("codex").run;
   assert.ok(codex.args({ mode: "write" }).join(" ").includes("sandbox_workspace_write.network_access=false"));
-  assert.ok(codex.args({ mode: "write" }).join(" ").includes("--disable apps"));
-  assert.ok(!codex.args({ mode: "read" }).join(" ").includes("--disable apps"));
+  // Account apps sit outside every sandbox, so they are off for organizing, reviewing and research too.
+  for (const mode of ["write", "read"]) assert.ok(codex.args({ mode }).join(" ").includes("--disable apps"), mode);
+  assert.ok(!codex.args({ mode: "read" }).join(" ").includes("network_access"));
   assert.match(codex.writeNote, /AIOS-NEEDS-WEB:/);
 });
 
