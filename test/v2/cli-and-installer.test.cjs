@@ -71,7 +71,8 @@ test("CLI init, doctor, status, chat, pause/resume, logs, and models work cleanl
 
   const modelsRes = runCli(["models", "--json"]);
   assert.equal(modelsRes.status, 0, modelsRes.stderr);
-  assert.ok(JSON.parse(modelsRes.stdout).models.length >= 4);
+  const models = JSON.parse(modelsRes.stdout).models;
+  assert.deepEqual([...new Set(models.map(model => model.provider))].sort(), ["claude", "codex", "opencode"]);
 
   const status = runStatus({
     profileDir,

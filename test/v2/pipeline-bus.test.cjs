@@ -149,7 +149,7 @@ test("full 3-stage critical pipeline: brief -> workhorse plan -> builder clarifi
   }
 });
 
-test("sandbox repo auto-merges cleanly and fails over automatically when first provider hits quota limit", async () => {
+test("a Codex limit hands the same worktree to Claude and then Antigravity", async () => {
   const tmp = mkTmp("aios-v2-failover-");
   try {
     const profileDir = path.join(tmp, ".aios");
@@ -163,14 +163,24 @@ test("sandbox repo auto-merges cleanly and fails over automatically when first p
     }, { profileDir });
 
     const store = createStore({ dbPath: path.join(profileDir, "os.db") });
-    let failedOnce = false;
     const triedBuilders = [];
+    store.upsertModel({
+      provider: "antigravity", modelId: "gemini-4-neon-high", tier: "workhorse",
+      effortLevels: ["high"], status: "listed", isDefault: true,
+    });
 
     const fakeRunner = async ({ provider, prompt, cwd, resultFile }) => {
       if (prompt.includes("AI-first OS Builder")) {
         triedBuilders.push(provider);
-        if (!failedOnce) {
-          failedOnce = true;
+        if (provider === "codex") {
+          fs.writeFileSync(path.join(cwd, "checkpoint.txt"), "Partial work from Codex.\n");
+        } else {
+          assert.equal(fs.readFileSync(path.join(cwd, "checkpoint.txt"), "utf8"), "Partial work from Codex.\n");
+          assert.match(prompt, /## Worker handoff/);
+          assert.match(prompt, /Continue in this same worktree/);
+          assert.match(prompt, /Keep the public interface unchanged\./);
+        }
+        if (provider === "codex" || provider === "claude") {
           return {
             ok: false,
             provider,
@@ -209,13 +219,15 @@ test("sandbox repo auto-merges cleanly and fails over automatically when first p
       stakes: "sandbox",
       brief: { title: "Quick tweak on side-toy", project: "side-toy", complexity: "trivial", summary: "Update index.js to 99" },
     });
+    store.updateTask(task.id, { assignedAgent: "codex" });
+    store.addThreadMessage({ taskId: task.id, role: "owner", content: "Keep the public interface unchanged." });
 
     const res = await pipeline.processTask(task.id);
     assert.equal(res.status, "done");
     assert.equal(res.delivery.merged, true);
-    assert.equal(triedBuilders.length, 2);
-    assert.notEqual(triedBuilders[0], triedBuilders[1]);
+    assert.deepEqual(triedBuilders, ["codex", "claude", "antigravity"]);
     assert.equal(store.getQuota(triedBuilders[0]).status, "exhausted");
+    assert.equal(store.getBusMessages(task.id).filter(message => message.msgType === "worker_handoff").length, 2);
     assert.equal(fs.readFileSync(path.join(repo, "index.js"), "utf8").replace(/\r\n/g, "\n"), "module.exports = () => 99;\n");
 
     store.close();

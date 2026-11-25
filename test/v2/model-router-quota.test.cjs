@@ -7,7 +7,7 @@ const os = require("node:os");
 const path = require("node:path");
 const { createStore } = require("../../lib/v2/store.cjs");
 const { parseResetAt, classifyProviderFailure, recordProviderFailure, getEffectiveProviderQuota } = require("../../lib/v2/quota.cjs");
-const { classifyModelTier, refreshModelCatalog, resolveModelForProvider } = require("../../lib/v2/model-catalog.cjs");
+const { classifyModelTier, parseModelListing, refreshModelCatalog, resolveModelForProvider } = require("../../lib/v2/model-catalog.cjs");
 const { selectAssignment, stagePolicy } = require("../../lib/v2/router.cjs");
 const { HARNESS_SPECS, getHarness, extractStructuredOutput } = require("../../lib/v2/harnesses.cjs");
 
@@ -88,6 +88,50 @@ test("model catalog classifies apex above workhorse, canary-verifies new models,
     // Disabling a provider cleanly excludes it from selection.
     const disabled = resolveModelForProvider({ store, profile: { models: { disabledProviders: ["codex"] } }, provider: "codex", desiredTier: "workhorse", desiredEffort: "high" });
     assert.equal(disabled.disabled, true);
+  } finally {
+    store.close();
+  }
+});
+
+test("Antigravity reconciles the subscription list, preserves exact pins, and follows supported efforts", async () => {
+  const store = createStore({ dbPath: ":memory:" });
+  try {
+    store.upsertModel({ provider: "antigravity", modelId: "Gemini 3.1 Pro (High)", tier: "workhorse", isDefault: true });
+    const profile = { models: {} };
+    const refresh = list => refreshModelCatalog({
+      store, profile, providers: ["antigravity"], listModelsForProvider: async () => list,
+    });
+    const pick = (effort, override) => resolveModelForProvider({
+      store, provider: "antigravity", desiredEffort: effort,
+      profile: { models: { overrides: override ? { antigravity: override } : {} } },
+    });
+    const first = parseModelListing("antigravity", [
+      "Fetching available models...",
+      "gemini-4-neon-high\tGemini 4 Neon (High)",
+      "gemini-4-neon-xhigh  Gemini 4 Neon (XHigh)",
+      "gemini-4-neon-low\tGemini 4 Neon (Low)",
+      "gemini-4-carbon-medium\tGemini 4 Carbon (Medium)",
+      "gemini-4-argon-medium\tGemini 4 Argon (Medium)",
+      "gemini-4-hydrogen-high\tGemini 4 Hydrogen (High)",
+    ].join("\n"));
+    const updated = await refresh(first);
+    assert.equal(updated.providerResults[0].count, 6);
+    assert.equal(updated.pendingApprovals.length, 0);
+    assert.equal(store.listModels({ provider: "antigravity" }).some(model => model.modelId.includes("3.1")), false);
+    assert.equal(pick("low").modelId, "gemini-4-neon-low");
+    assert.equal(pick("ultra").modelId, "gemini-4-neon-xhigh");
+    assert.equal(pick("high", "gemini-4-carbon-medium").effort, "medium");
+
+    const unavailable = await refresh([]);
+    assert.equal(unavailable.providerResults[0].status, "unavailable");
+    assert.equal(store.listModels({ provider: "antigravity" }).length, 6);
+    profile.models.removedModels = ["antigravity:gemini-4-neon-low"];
+    await refresh(["gemini-5-example-high", ...first.filter(id => !id.includes("argon"))]);
+    const ids = store.listModels({ provider: "antigravity" }).map(model => model.modelId);
+    assert.ok(ids.includes("gemini-5-example-high"));
+    assert.ok(!ids.includes("gemini-4-argon-medium"));
+    assert.ok(!ids.includes("gemini-4-neon-low"));
+    assert.equal(pick("high", "gemini-4-argon-medium").modelId, "gemini-4-neon-high");
   } finally {
     store.close();
   }

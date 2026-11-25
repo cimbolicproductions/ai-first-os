@@ -71,7 +71,8 @@ test("unified daemon serves single responsive UI, enforces auth, runs full chat 
     vault,
     detect: allSignedIn,
     runner: fakeRunner,
-    listModelsFn: async () => [],
+    listModelsFn: async provider => provider === "antigravity"
+      ? ["gemini-4-neon-high", "gemini-4-carbon-medium"] : null,
   });
 
   try {
@@ -134,6 +135,23 @@ test("unified daemon serves single responsive UI, enforces auth, runs full chat 
     assert.equal(removeRes.ok, true);
     assert.ok(daemon.getProfile().models.removedModels.includes("codex:gpt-6.3-sol"));
     assert.equal(daemon.getProfile().models.overrides.codex, "gpt-6.2-sol");
+
+    const phoneHeaders = { "content-type": "application/json", authorization: `Bearer ${started.phoneToken}` };
+    const report = await fetch(`${started.url}/api/v2/models/refresh`, {
+      method: "POST", headers: phoneHeaders,
+    }).then(r => r.json());
+    assert.deepEqual(report.providerResults.find(item => item.provider === "antigravity"), {
+      provider: "antigravity", status: "updated", count: 2,
+    });
+    for (const modelId of ["gemini-4-carbon-medium", "__automatic__"]) {
+      const choice = await fetch(`${started.url}/api/v2/models/select`, {
+        method: "POST", headers: phoneHeaders, body: JSON.stringify({ provider: "antigravity", modelId }),
+      });
+      assert.equal(choice.status, 200);
+    }
+    const snapshot = await fetch(`${started.url}/api/v2/state`, { headers: phoneHeaders }).then(r => r.json());
+    assert.equal(snapshot.modelSettings.overrides.antigravity, undefined);
+    assert.equal(snapshot.modelSettings.automaticModels.antigravity, "gemini-4-neon-high");
 
     // 4. Enable Muse connector -> Muse gets its own bearer token -> scoped ONLY to intake routes!
     const museSetup = await fetch(`${started.url}/api/v2/connectors/token`, {
