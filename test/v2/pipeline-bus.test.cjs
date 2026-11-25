@@ -10,6 +10,7 @@ const { saveProfile, loadProfile } = require("../../lib/v2/profile.cjs");
 const { runGitDefault } = require("../../lib/v2/worktree.cjs");
 const { createPipeline } = require("../../lib/v2/pipeline.cjs");
 const { HARNESS_SPECS } = require("../../lib/v2/harnesses.cjs");
+const { createRunSpace } = require("../../lib/v2/agent-bus.cjs");
 
 function mkTmp(prefix) {
   return fs.mkdtempSync(path.join(os.tmpdir(), prefix));
@@ -51,14 +52,18 @@ test("full 3-stage critical pipeline: brief -> workhorse plan -> builder clarifi
     const calls = [];
     let buildAttempt = 0;
     let auditAttempt = 0;
+    const planners = [];
 
-    const fakeRunner = async ({ provider, prompt, cwd, resultFile, mode, model, effort }) => {
+    const fakeRunner = async ({ provider, prompt, cwd, resultFile, mode, model, effort, timeoutMs }) => {
       calls.push({ provider, mode, model, effort });
       let payload;
 
       if (prompt.includes("Builder Clarification Request")) {
         payload = { status: "plan_answer", answer: "Return 42 for valid input.", planAddendum: "Export value 42." };
       } else if (prompt.includes("AI-first OS Architect / Planner")) {
+        planners.push(provider);
+        assert.equal(timeoutMs, 180000);
+        if (planners.length === 1) return { ok: true, provider, structured: { status: "plan_ready" } };
         payload = { status: "plan_ready", planMarkdown: "# Plan\nUpdate index.js to export 42.\n", verificationCommands: ["node -e 'process.exit(0)'"] };
       } else if (prompt.includes("AI-first OS Builder")) {
         buildAttempt++;
@@ -123,10 +128,11 @@ test("full 3-stage critical pipeline: brief -> workhorse plan -> builder clarifi
     assert.equal(res.delivery.auditRounds, 2);
     // Distinct auditor invariant verified!
     assert.notEqual(res.delivery.builder, res.delivery.auditor);
+    assert.deepEqual(planners, ["claude", "codex"]);
 
     // Terminal bus recorded the full agent-to-agent conversation!
     const bus = store.getBusMessages(task.id).map(m => m.msgType);
-    assert.deepEqual(bus, ["plan_ready", "clarify_plan", "plan_answer", "build_complete", "audit_findings", "fix_applied", "audit_clean"]);
+    assert.deepEqual(bus, ["worker_handoff", "plan_ready", "clarify_plan", "plan_answer", "build_complete", "audit_findings", "fix_applied", "audit_clean"]);
 
     // Main repo is still untouched until owner taps Merge!
     assert.equal(fs.readFileSync(path.join(repo, "index.js"), "utf8").replace(/\r\n/g, "\n"), "module.exports = () => 1;\n");
@@ -145,6 +151,47 @@ test("full 3-stage critical pipeline: brief -> workhorse plan -> builder clarifi
 
     store.close();
   } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("headless permission failures retry intake without reusing a stale timer", async () => {
+  const tmp = mkTmp("aios-v2-intake-retry-");
+  const store = createStore({ dbPath: ":memory:", now: () => 100000 });
+  try {
+    store.upsertModel({
+      provider: "antigravity", modelId: "gemini-4-neon-low", tier: "workhorse",
+      effortLevels: ["low"], status: "listed", isDefault: true,
+    });
+    const task = store.createTask({ text: "Explain the worker settings." });
+    const runsDir = path.join(tmp, "runs");
+    const runSpace = createRunSpace({ runsDir, taskId: task.id });
+    runSpace.upsertStep({
+      id: "intake", status: "in_progress", at: 1, activity: "An earlier attempt",
+    });
+    const tried = [];
+    const pipeline = createPipeline({
+      store, profileDir: tmp, runsDir, worktreesDir: path.join(tmp, "worktrees"),
+      getProfile: () => ({ models: { disabledProviders: ["opencode"] } }),
+      detect: allSignedIn, now: () => 100000,
+      runner: async ({ provider, timeoutMs }) => {
+        assert.equal(timeoutMs, 90000);
+        tried.push(provider);
+        if (provider === "antigravity") {
+          return { ok: false, failure: { kind: "permission_blocked", reason: "Antigravity needed command permission in headless mode." } };
+        }
+        return { ok: true, structured: { status: "answer", answer: "Worker settings explained." } };
+      },
+    });
+    assert.equal((await pipeline.processTask(task.id)).status, "done");
+    assert.deepEqual(tried, ["antigravity", "claude"]);
+    const [step] = runSpace.readSteps();
+    assert.equal(step.startedAt, 100000);
+    assert.equal(step.endedAt, 100000);
+    assert.ok(!step.activities.includes("An earlier attempt"));
+    assert.equal(store.getBusMessages(task.id)[0].payload.reason, "permission_blocked");
+  } finally {
+    store.close();
     fs.rmSync(tmp, { recursive: true, force: true });
   }
 });
