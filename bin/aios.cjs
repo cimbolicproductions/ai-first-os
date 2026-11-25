@@ -1,782 +1,523 @@
 #!/usr/bin/env node
 "use strict";
 
+const { spawn, spawnSync } = require("node:child_process");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
-const readline = require("node:readline/promises");
-const { detectInstalledAgents, cachedDetect, runInteractiveSignIn } = require("../lib/agent-auth.cjs");
-const { bootstrapVault } = require("../lib/vault-bootstrap.cjs");
-const { resolveSkillsPath } = require("../lib/vault-options.cjs");
-const { renderAgentInstructions } = require("../lib/ideology.cjs");
-const { validateSecretName, checkSecretExists, scanDirectoryForSecrets, readSecret, storeSecret } = require("../lib/keyring.cjs");
-const { createLocalBoard } = require("../adapters/local-board.cjs");
-const { dispatchBoardTask, answerNotice } = require("../lib/os-runtime.cjs");
-const { startTui } = require("../lib/shell-tui.cjs");
-const { createDesktopServer, launchFramelessAppWindow } = require("../lib/desktop-hud.cjs");
-const { connectServiceFromCatalog, SERVICE_DROPDOWN_CATALOG } = require("../lib/service-catalog.cjs");
-const { captureVoiceNative, saveVoiceDumpToInbox, shareToTarget } = require("../lib/voice-and-share.cjs");
-const { toSimpleYaml, loadManifest, saveManifest, getSetting, setSetting } = require("../lib/workspace.cjs");
-const { HARNESSES, PERSONAL_AGENTS, labelFor } = require("../lib/harness-registry.cjs");
-const { availabilityFromDetected, buildRoleSlate } = require("../lib/roles.cjs");
-const { createNoticeBook } = require("../lib/notices.cjs");
-const { requestAudit, auditOffers } = require("../lib/audit-loop.cjs");
-const { buildDailySummary, applyUndo } = require("../lib/daily-summary.cjs");
-const { buildIntroModel, profileFromIntro, runTerminalIntro } = require("../lib/first-run.cjs");
-const { startHomeServices } = require("../lib/home-service.cjs");
+const {
+  defaultProfileDir,
+  profileFilePath,
+  loadProfile,
+  saveProfile,
+  listAllProjects,
+  resolveProject,
+  stakesForProject,
+  normalizeProfile,
+} = require("../lib/v2/profile.cjs");
+const { createStore } = require("../lib/v2/store.cjs");
+const { detectHarnesses, listLiveModels } = require("../lib/v2/harnesses.cjs");
+const { refreshModelCatalog, seedBaselineModels } = require("../lib/v2/model-catalog.cjs");
+const { createDaemon } = require("../lib/v2/daemon.cjs");
+const { createSecretVault } = require("../lib/v2/auth-broker.cjs");
+const { detectGrokBot } = require("../lib/v2/connectors.cjs");
+const { scanDirectoryForSecrets } = require("../lib/keyring.cjs");
 const { installAutostart, removeAutostart, isAutostartInstalled, keepAlive } = require("../lib/autostart.cjs");
-const { connectBackend, SECRET_NAMES } = require("../lib/backend-provision.cjs");
-const { newToken, buildPhoneLink } = require("../lib/cloud-link.cjs");
-const { createMuseConnection } = require("../lib/muse-connect.cjs");
+const { underTest } = require("../lib/harness-registry.cjs");
 
 const CLI_PATH = __filename;
-const NEEDS_SETUP = "AI-first OS is not set up here yet. Run `node bin/aios.cjs` first.";
 
-function loadProductConfig() {
+function parseArgs(argv) {
+  const [cmd = "desktop", ...rest] = argv;
+  const flags = {
+    profileDir: process.env.AIOS_PROFILE_DIR || defaultProfileDir(),
+    host: null,
+    port: null,
+    project: null,
+    taskId: null,
+    owner: null,
+    vault: null,
+    roots: [],
+    tailscale: null,
+    noWindow: false,
+    json: false,
+    refresh: false,
+  };
+  const positional = [];
+  for (let i = 0; i < rest.length; i++) {
+    const a = rest[i];
+    if (a === "--profile-dir" || a === "--dir") flags.profileDir = path.resolve(rest[++i] || flags.profileDir);
+    else if (a === "--host") flags.host = rest[++i] || null;
+    else if (a === "--port") flags.port = Number(rest[++i]);
+    else if (a === "--project" || a === "-p") flags.project = rest[++i] || null;
+    else if (a === "--task" || a === "--id") flags.taskId = rest[++i] || null;
+    else if (a === "--owner") flags.owner = rest[++i] || null;
+    else if (a === "--vault") flags.vault = rest[++i] || null;
+    else if (a === "--root") { const r = rest[++i]; if (r) flags.roots.push(r); }
+    else if (a === "--tailscale") flags.tailscale = rest[++i] || null;
+    else if (a === "--no-window") flags.noWindow = true;
+    else if (a === "--json") flags.json = true;
+    else if (a === "--refresh") flags.refresh = true;
+    else if (!a.startsWith("-")) positional.push(a);
+  }
+  return { cmd, flags, positional };
+}
+
+function launchAppWindow(url, { platform = process.platform, spawnFn = spawn } = {}) {
+  if (underTest()) return { launched: false, reason: "under-test" };
   try {
-    return JSON.parse(fs.readFileSync(path.join(__dirname, "..", "product.json"), "utf8"));
-  } catch {
-    return {};
+    if (platform === "win32") {
+      const candidates = [
+        path.join(process.env["ProgramFiles(x86)"] || "", "Microsoft", "Edge", "Application", "msedge.exe"),
+        path.join(process.env.ProgramFiles || "", "Microsoft", "Edge", "Application", "msedge.exe"),
+        path.join(process.env.ProgramFiles || "", "Google", "Chrome", "Application", "chrome.exe"),
+      ].filter(p => p && fs.existsSync(p));
+      if (candidates.length) {
+        const child = spawnFn(candidates[0], [`--app=${url}`], { detached: true, stdio: "ignore", windowsHide: true });
+        child.unref?.();
+        return { launched: true, browser: candidates[0] };
+      }
+      const fallback = spawnFn("cmd.exe", ["/c", "start", "", url], { detached: true, stdio: "ignore", windowsHide: true });
+      fallback.unref?.();
+      return { launched: true, browser: "default" };
+    }
+    if (platform === "darwin") {
+      const child = spawnFn("open", [url], { detached: true, stdio: "ignore" });
+      child.unref?.();
+      return { launched: true, browser: "open" };
+    }
+    const child = spawnFn("xdg-open", [url], { detached: true, stdio: "ignore" });
+    child.unref?.();
+    return { launched: true, browser: "xdg-open" };
+  } catch (err) {
+    return { launched: false, error: err.message };
   }
 }
 
-function buildManifestFromProfile(profile, workspaceRoot) {
-  const machines = {
-    primary: {
-      os: process.platform,
-      role: "project-data-and-local-builds",
-      workspace: workspaceRoot,
+function runInitProfile({ profileDir = defaultProfileDir(), owner, vault, roots = [], tailscale } = {}) {
+  const dir = path.resolve(profileDir);
+  const current = loadProfile({ profileDir: dir });
+  const next = normalizeProfile({
+    ...current,
+    ...(owner ? { owner } : {}),
+    ...(vault ? { vaultPath: path.resolve(vault) } : {}),
+    ...(roots.length ? { projectRoots: [...new Set([...(current.projectRoots || []), ...roots.map(r => path.resolve(r))])] } : {}),
+    transport: {
+      ...(current.transport || {}),
+      ...(tailscale ? { tailscaleHost: tailscale } : {}),
     },
-  };
-  if (profile.workStyle === "hybrid-hub-and-mobile") {
-    machines["always-on-hub"] = {
-      os: profile.hubOs || "macos",
-      role: "always-on-workers",
-      agents: profile.agents?.builders || ["claude", "codex"],
+  });
+  const savedPath = saveProfile(next, { profileDir: dir });
+  return { ok: true, profilePath: savedPath, profile: next };
+}
+
+function runStatus({ profileDir = defaultProfileDir(), detect = detectHarnesses } = {}) {
+  const dir = path.resolve(profileDir);
+  const profile = loadProfile({ profileDir: dir });
+  const store = createStore({ dbPath: path.join(dir, "os.db") });
+  seedBaselineModels(store);
+  try {
+    const tasks = store.listTasks({ limit: 30 });
+    const pendingApprovals = store.listOpenApprovals();
+    const quotas = store.listQuotas();
+    const models = store.listModels();
+    const agents = detect({ workspaceRoot: dir });
+    return {
+      ok: true,
+      owner: profile.owner,
+      profileDir: dir,
+      queuePaused: store.getQueueState().paused,
+      counts: {
+        active: tasks.filter(t => ["open", "running"].includes(t.status)).length,
+        waiting: tasks.filter(t => t.status === "waiting").length,
+        done: tasks.filter(t => t.status === "done").length,
+        pendingApprovals: pendingApprovals.length,
+      },
+      tasks: tasks.slice(0, 15).map(t => ({
+        id: t.id,
+        title: t.title,
+        status: t.status,
+        stage: t.stage,
+        project: t.projectName,
+        stakes: t.stakes,
+        updatedAt: t.updatedAt,
+      })),
+      pendingApprovals: pendingApprovals.map(a => ({ id: a.id, taskId: a.taskId, kind: a.kind, prompt: a.prompt })),
+      agents: agents.map(a => ({
+        id: a.id,
+        label: a.label,
+        installed: a.installed,
+        signedIn: a.signedIn,
+        headless: a.headless,
+      })),
+      quotas,
+      modelsCount: models.length,
     };
+  } finally {
+    store.close();
   }
-
-  const builders = profile.agents?.builders || ["claude", "codex"];
-  const researchers = profile.agents?.researchers || ["antigravity"];
-  const connections = {
-    github: {
-      type: "mcp",
-      agents: [...builders, ...researchers],
-      secretName: "GITHUB_TOKEN",
-    },
-    ...(profile.connections || {}),
-  };
-
-  const roles =
-    profile.roleSlate ||
-    buildRoleSlate({ orchestrator: profile.routerName || "router", builder: builders[0], auditor: builders[1], researcher: researchers[0] });
-  const vaultPath = path.resolve(workspaceRoot, profile.vaultPath || "./ContextVault");
-
-  return {
-    name: "ai-first-os",
-    version: 1,
-    owner: profile.userName || "User",
-    primaryGoal: profile.primaryGoal || "Ship high-leverage work",
-    vaultPath,
-    skillsPath: resolveSkillsPath({ pick: profile.skillsPick, customPath: profile.skillsCustomPath, vaultPath, options: profile.obsidianOptions }),
-    vault: { obsidian: profile.obsidian === true },
-    board: {
-      mode: profile.boardMode || "local",
-      canonicalAuthority: profile.boardMode === "sheets" ? "google-sheet" : "local-json",
-      writeRule: "by-column-name-never-position",
-      ...(profile.sheetsConfig ? { sheets: profile.sheetsConfig } : { localDir: path.resolve(workspaceRoot, "./board") }),
-    },
-    ideology: {
-      routerFunnel: profile.routerName || "Router",
-      oneOwnerPerRow: true,
-      claimFirst: true,
-      buildStraightThrough: true,
-      hardGates: [
-        "any_spend_of_any_amount",
-        "external_sends",
-        "public_submissions",
-        "refunds_or_billing_changes",
-      ],
-      untrustedBoardProse: true,
-      untrustedDoorbellEvents: true,
-      cloudScheduledRuns: "read-and-report-only-for-local-code",
-      maxAutomaticStartsPerDay: profile.maxAutomaticStartsPerDay || 6,
-    },
-    machines,
-    roles,
-    models: profile.models || {},
-    settings: {},
-    summary: { morningPush: false, hour: 8 },
-    firstRun: { completed: true },
-    agents: {
-      [String(profile.routerName || "router").toLowerCase()]: { role: "organize", managedBy: "router" },
-      ...Object.fromEntries(builders.map(a => [a, { role: "build" }])),
-      ...Object.fromEntries(researchers.map(a => [a, { role: "research" }])),
-    },
-    connections,
-    verdicts: profile.verdicts || [
-      { name: "example-bloated-mcp", decision: "rejected", reason: "Prefer lightweight REST or router-owned connector when MCP adds process bloat." },
-    ],
-  };
 }
 
-function syncWorkspaceConfigs(manifest, workspaceRoot, profile = {}) {
-  const written = [];
-  const vaultPath = manifest.vaultPath;
-  const effectiveProfile = {
-    userName: manifest.owner,
-    routerName: manifest.ideology.routerFunnel,
-    boardMode: manifest.board.mode,
-    skillsPath: manifest.skillsPath,
-    agents: profile.agents || {
-      builders: Object.entries(manifest.agents).filter(([, v]) => v.role === "build").map(([k]) => k),
-      researchers: Object.entries(manifest.agents).filter(([, v]) => v.role === "research").map(([k]) => k),
-    },
-    preferences: profile.preferences,
-  };
+function runDoctor({ profileDir = defaultProfileDir(), detect = detectHarnesses, execProbe = spawnSync } = {}) {
+  const dir = path.resolve(profileDir);
+  const profilePath = profileFilePath(dir);
+  const profile = loadProfile({ profileDir: dir });
+  const nodeMajor = Number(process.versions.node.split(".")[0]);
+  const gitRes = execProbe("git", ["--version"], { encoding: "utf8", windowsHide: true, timeout: 4000 });
+  const gitOk = gitRes.status === 0;
 
-  const agentFiles = [
-    ["CLAUDE.md", "claude", "build"],
-    ["AGENTS.md", "codex", "build"],
-    // Research instructions, under the file name Gemini-model tools look for.
-    ["GEMINI.md", "antigravity", "research"],
+  let sqliteOk = false;
+  let storeDetail = "";
+  try {
+    const store = createStore({ dbPath: path.join(dir, "os.db") });
+    store.listTasks({ limit: 1 });
+    store.close();
+    sqliteOk = true;
+    storeDetail = path.join(dir, "os.db");
+  } catch (err) {
+    storeDetail = err.message;
+  }
+
+  const projects = listAllProjects(profile);
+  const agents = detect({ workspaceRoot: dir });
+  const grokbot = detectGrokBot();
+  const vaultConfigured = Boolean(profile.vaultPath);
+  const vaultOk = !vaultConfigured || fs.existsSync(profile.vaultPath);
+  const secretScan = fs.existsSync(dir) ? scanDirectoryForSecrets(dir) : { clean: true, findings: [] };
+
+  const checks = [
+    { name: "node_22_plus", ok: nodeMajor >= 22, detail: process.versions.node },
+    { name: "sqlite_store", ok: sqliteOk, detail: storeDetail },
+    { name: "git_available", ok: gitOk, detail: (gitRes.stdout || "").trim() || "git not found" },
+    { name: "profile_loaded", ok: true, detail: fs.existsSync(profilePath) ? profilePath : `${profilePath} (defaults)` },
+    { name: "vault_ready", ok: vaultOk, detail: profile.vaultPath || "not configured" },
+    { name: "projects_discovered", ok: true, detail: `${projects.length} project(s)` },
+    { name: "agent_clis", ok: agents.some(a => a.installed && a.headless), detail: agents.filter(a => a.installed).map(a => a.id).join(", ") || "none installed" },
+    { name: "secret_hygiene", ok: secretScan.clean, detail: secretScan.clean ? "clean" : `${secretScan.findings.length} finding(s)` },
   ];
 
-  for (const [filename, agentName, role] of agentFiles) {
-    const filePath = path.join(workspaceRoot, filename);
-    fs.writeFileSync(
-      filePath,
-      renderAgentInstructions({ agentName, role, profile: effectiveProfile, vaultPath }),
-      "utf8"
-    );
-    written.push(filename);
-  }
-
-  const mcpServers = {};
-  for (const [connName, conn] of Object.entries(manifest.connections || {})) {
-    if (conn.type !== "mcp") continue;
-    if (conn.secretName && !validateSecretName(conn.secretName)) {
-      throw new Error(`Invalid secretName "${conn.secretName}" for connection "${connName}".`);
-    }
-    mcpServers[connName] = {
-      type: "stdio",
-      command: conn.command || "npx",
-      args: conn.args || ["-y", `@modelcontextprotocol/server-${connName}`],
-      env: conn.secretName ? { [conn.secretName]: `\${${conn.secretName}}` } : {},
-    };
-  }
-  const mcpPath = path.join(workspaceRoot, ".mcp.json");
-  fs.writeFileSync(mcpPath, JSON.stringify({ mcpServers }, null, 2) + "\n", "utf8");
-  written.push(".mcp.json");
-
-  return { written };
-}
-
-async function runInit({
-  workspaceRoot = process.cwd(),
-  answers = null,
-  execProbe,
-  homeDir,
-  detected = null,
-} = {}) {
-  const root = path.resolve(workspaceRoot);
-  fs.mkdirSync(root, { recursive: true });
-
-  const agents = detected || detectInstalledAgents({ execProbe, homeDir, workspaceRoot: root });
-
-  let profile = answers;
-  if (!profile) {
-    const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-    try {
-      const model = buildIntroModel(agents, { workspaceRoot: root });
-      const selection = await runTerminalIntro({
-        ask: q => rl.question(q),
-        write: t => process.stdout.write(t),
-        detected: agents,
-        model,
-        onSignIn: runInteractiveSignIn,
-      });
-      profile = profileFromIntro(selection, agents);
-    } finally {
-      rl.close();
-    }
-  }
-
-  const manifest = buildManifestFromProfile(profile, root);
-  saveManifest(root, manifest);
-
-  const vaultResult = bootstrapVault(manifest.vaultPath, { ...profile, skillsPath: manifest.skillsPath });
-
-  let boardResult = null;
-  let board = null;
-  if (manifest.board.mode === "local") {
-    board = createLocalBoard({
-      boardDir: manifest.board.localDir,
-      routerName: manifest.ideology.routerFunnel,
-    });
-    boardResult = board.initBoard([], { empty: profile.emptyBoard === true });
-  }
-
-  const syncResult = syncWorkspaceConfigs(manifest, root, profile);
-
+  const criticalFailed = checks.filter(c => ["node_22_plus", "sqlite_store", "git_available", "secret_hygiene"].includes(c.name) && !c.ok);
   return {
-    detectedAgents: agents,
-    manifest,
-    vaultResult,
-    boardResult,
-    board,
-    syncResult,
-  };
-}
-
-function runDoctor({ workspaceRoot = process.cwd(), execProbe, homeDir, env = process.env, platform = process.platform } = {}) {
-  const root = path.resolve(workspaceRoot);
-  const manifest = loadManifest(root);
-  if (!manifest) {
-    return { ok: false, error: NEEDS_SETUP };
-  }
-  const agents = detectInstalledAgents({ execProbe, homeDir, env, workspaceRoot: root });
-
-  const checks = [];
-  checks.push({
-    name: "vault_exists",
-    ok: fs.existsSync(manifest.vaultPath) && fs.existsSync(path.join(manifest.vaultPath, "08_Systems_and_SOPs", "OPERATING_CONSTITUTION.md")),
-    detail: manifest.vaultPath,
-  });
-
-  if (manifest.board?.mode === "local") {
-    const boardJson = path.join(manifest.board.localDir, "board.json");
-    checks.push({
-      name: "local_board_ready",
-      ok: fs.existsSync(boardJson),
-      detail: boardJson,
-    });
-  } else if (manifest.board?.mode === "sheets") {
-    checks.push({
-      name: "sheets_board_id_configured",
-      ok: Boolean(manifest.board.sheets?.boardId),
-      detail: manifest.board.sheets?.boardId || "missing boardId",
-    });
-  }
-
-  const secretChecks = [];
-  for (const [connName, conn] of Object.entries(manifest.connections || {})) {
-    if (!conn.secretName) continue;
-    const status = checkSecretExists(conn.secretName, { platform, env, execProbe });
-    secretChecks.push({ connection: connName, secretName: conn.secretName, ...status });
-  }
-
-  const workspaceScan = scanDirectoryForSecrets(root);
-  const vaultScan = fs.existsSync(manifest.vaultPath) ? scanDirectoryForSecrets(manifest.vaultPath) : { clean: true, findings: [] };
-  const secretHygieneOk = workspaceScan.clean && vaultScan.clean;
-  checks.push({
-    name: "secret_hygiene_clean",
-    ok: secretHygieneOk,
-    detail: secretHygieneOk ? "0 leaked secrets or .env files" : `${workspaceScan.findings.length + vaultScan.findings.length} finding(s)`,
-    findings: [...workspaceScan.findings, ...vaultScan.findings],
-  });
-
-  const ok = checks.every(c => c.ok);
-  return {
-    ok,
-    owner: manifest.owner,
-    router: manifest.ideology?.routerFunnel,
-    boardMode: manifest.board?.mode,
-    agents,
+    ok: criticalFailed.length === 0,
+    owner: profile.owner,
+    profilePath,
     checks,
-    secretChecks,
+    agents: agents.map(a => ({ id: a.id, label: a.label, installed: a.installed, signedIn: a.signedIn, headless: a.headless })),
+    projectsCount: projects.length,
+    connectors: {
+      grokbot: { enabled: Boolean(profile.connectors?.grokbot?.enabled), installed: grokbot.installed, daemonDir: grokbot.daemonDir || null },
+      muse: { enabled: Boolean(profile.connectors?.muse?.enabled) },
+      sheetsSync: { enabled: Boolean(profile.connectors?.sheetsSync?.enabled) },
+    },
   };
 }
 
-function lanIp() {
-  for (const nets of Object.values(os.networkInterfaces())) {
-    for (const net of nets || []) {
-      if (net.family === "IPv4" && !net.internal) return net.address;
-    }
-  }
-  return "127.0.0.1";
-}
-
-/** Asks in the moment, once, then remembers. Falls back quietly with no terminal. */
-async function askOnceInTerminal({ manifest, root, key, question, choices, fallback }) {
-  const standing = getSetting(manifest, key);
-  if (standing !== undefined) return standing;
-  if (!process.stdin.isTTY) return fallback;
-  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+async function tryDaemonPost(profile, route, body) {
+  const port = profile.transport?.port || 4318;
+  const url = `http://127.0.0.1:${port}${route}`;
   try {
-    process.stdout.write(`\n${question}\n\n`);
-    choices.forEach((c, i) => process.stdout.write(`  ${i + 1}. ${c.label}\n`));
-    const picked = Number((await rl.question("\nPick one [1]: ")).trim() || 1);
-    const value = (choices[picked - 1] || choices[0]).value;
-    setSetting(manifest, key, value);
-    saveManifest(root, manifest);
-    return value;
-  } finally {
-    rl.close();
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body || {}),
+      signal: AbortSignal.timeout(1500),
+    });
+    if (!res.ok) return null;
+    return await res.json();
+  } catch {
+    return null;
   }
-}
-
-function openBoard(manifest, root) {
-  return createLocalBoard({
-    boardDir: manifest.board?.localDir || path.join(root, "board"),
-    routerName: manifest.ideology?.routerFunnel || "Router",
-  });
-}
-
-function requireManifest(root) {
-  const manifest = loadManifest(root);
-  if (!manifest) throw new Error(NEEDS_SETUP);
-  return manifest;
-}
-
-const printJson = value => process.stdout.write(JSON.stringify(value, null, 2) + "\n");
-
-function makeSaver(root) {
-  return next => {
-    saveManifest(root, next);
-    syncWorkspaceConfigs(next, root);
-  };
-}
-
-async function setUpPhoneOnThisNetwork(manifest, root) {
-  if (!readSecret(SECRET_NAMES.home)) storeSecret(SECRET_NAMES.home, newToken());
-  if (!readSecret(SECRET_NAMES.phone)) storeSecret(SECRET_NAMES.phone, newToken());
-  manifest.backend = { kind: "local", port: manifest.backend?.port || 8787 };
-  saveManifest(root, manifest);
-}
-
-async function confirmInTerminal(question) {
-  if (!process.stdin.isTTY) return false;
-  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-  try {
-    return /^y(es)?$/i.test((await rl.question(`${question} (y/N): `)).trim());
-  } finally {
-    rl.close();
-  }
-}
-
-function phoneLinkFor(manifest) {
-  const phoneToken = readSecret(SECRET_NAMES.phone);
-  if (!phoneToken) return null;
-  if (manifest.backend?.kind === "local") {
-    const base = `http://${lanIp()}:${manifest.backend.port}`;
-    return buildPhoneLink({ pageUrl: `${base}/`, relayUrl: base, phoneToken });
-  }
-  const pageUrl = loadProductConfig().phoneAppUrl;
-  if (!pageUrl || !manifest.backend?.relayUrl) return null;
-  return buildPhoneLink({ pageUrl, relayUrl: manifest.backend.relayUrl, phoneToken });
-}
-
-const COST_QUESTION = "Creating your phone connection on this Supabase account may add to its bill. Create it anyway?";
-const phoneSession = {};
-
-/** One path for the desktop button and the terminal command. Never throws plain errors at a person. */
-async function connectPhone({ manifest, root, approveCost = false, confirmCost = null }) {
-  const alreadyCloud = manifest.backend && manifest.backend.kind !== "local";
-  if (!alreadyCloud) {
-    let result;
-    try {
-      result = await connectBackend({
-        product: loadProductConfig(),
-        storeSecret,
-        session: phoneSession,
-        confirmCost: confirmCost || (async () => approveCost),
-      });
-    } catch (err) {
-      return { ok: false, code: err.code || "CONNECT_FAILED", message: err.message };
-    }
-    if (!result.ok) {
-      return { ok: false, code: result.code, message: result.message || null, question: result.code === "COST_NOT_APPROVED" ? COST_QUESTION : null };
-    }
-    manifest.backend = result.backend;
-    saveManifest(root, manifest);
-    delete phoneSession.accessToken;
-  }
-  return { ok: true, link: phoneLinkFor(manifest), newlyConnected: !alreadyCloud };
-}
-
-async function runWatch(root, manifest) {
-  const service = await startHomeServices({
-    workspaceRoot: root,
-    manifest,
-    saveManifest: makeSaver(root),
-    onDispatch: res => process.stdout.write(`[AI-first OS] ${res.taskId}: ${res.status}${res.agent ? ` (${labelFor(res.agent)})` : ""}\n`),
-    onStatus: text => process.stdout.write(`[AI-first OS] ${text}\n`),
-  });
-  if (!service.started) {
-    process.stdout.write("AI-first OS is already running on this computer.\n");
-    return service;
-  }
-  process.stdout.write(`AI-first OS is watching ${root} (Ctrl+C to stop).\n`);
-  const stop = () => {
-    service.stop();
-    process.exit(0);
-  };
-  process.on("SIGINT", stop);
-  process.on("SIGTERM", stop);
-  return service;
 }
 
 const HELP = [
-  "AI-first OS",
+  "AI-first OS v2",
   "",
-  "  aios                   Open the terminal shell (first run sets you up)",
-  "  aios desktop           Open the desktop app",
-  "  aios task \"<text>\"     Put a task on the board",
-  "  aios board             Show the board",
-  "  aios run [<id>]        Run the next task, or one by ID",
-  "  aios audit <id>        Have the other agent check finished work",
-  "  aios ask               Answer anything waiting on you",
-  "  aios today             What your agents did today",
-  "  aios undo <id> <reopen|withdraw>",
-  "  aios role <role> <agent>   Change orchestrator, builder, auditor or researcher",
-  "  aios watch             Keep working in the background",
-  "  aios autostart on|off  Start with this computer",
-  "  aios phone             Get your phone link",
-  "  aios phone --here      Use your phone on this Wi-Fi",
-  "  aios share \"<text>\" --to <agent>",
-  "  aios voice             Say a task",
-  "  aios connect [service] Connect a service",
-  "  aios doctor            Check everything",
+  "  aios [desktop]               Start the unified daemon and open the OS UI",
+  "  aios daemon | watch          Run the unified daemon headless (SSH/Tailscale/queue)",
+  "  aios chat \"<text>\"           Send a request or reply to a task",
+  "  aios wake <text|taskId>      Enqueue a request or resume a task",
+  "  aios status [--json]         Show queue state, active work, CLIs, and quotas",
+  "  aios logs <taskId> [--json]  Show thread, terminal agent bus, and delivery card",
+  "  aios pause | resume          Pause or resume automatic task execution",
+  "  aios models [--refresh]      List discovered models or run live canary discovery",
+  "  aios phone [--json]          Print the direct phone pairing URL",
+  "  aios doctor [--json]         Verify Node, SQLite, git, CLIs, vault, and hygiene",
+  "  aios init [options]          Initialize or update ~/.aios/profile.json",
+  "  aios autostart on|off|status Manage sign-in autostart",
+  "  aios keep-alive              Crash-backoff supervisor for `aios daemon`",
+  "",
+  "Flags:",
+  "  --profile-dir <path>         Use a custom state/profile directory (default: ~/.aios)",
+  "  --host <addr> --port <num>   Override daemon bind host/port",
+  "  --no-window                  Do not open a browser window on `aios desktop`",
+  "  --project <name>             Explicitly target a repo on `chat` / `wake`",
+  "  --task <id>                  Reply to an existing task on `chat`",
   "",
 ].join("\n");
 
-if (require.main === module) {
-  (async () => {
-    const [cmd, ...rest] = process.argv.slice(2);
-    let answersPath = null;
-    let workspaceRoot = process.cwd();
-    let targetAgent = null;
-    let taskTitle = null;
-    let taskId = null;
-    let here = false;
-    let noWindow = false;
-    const positional = [];
+function printJson(obj) {
+  process.stdout.write(JSON.stringify(obj, null, 2) + "\n");
+}
 
-    for (let i = 0; i < rest.length; i++) {
-      if (rest[i] === "--answers") answersPath = rest[++i];
-      else if (rest[i] === "--dir") workspaceRoot = rest[++i];
-      else if (rest[i] === "--to" || rest[i] === "--agent") targetAgent = rest[++i];
-      else if (rest[i] === "--id") taskId = rest[++i];
-      else if (rest[i] === "--here") here = true;
-      else if (rest[i] === "--no-window") noWindow = true;
-      else if (!rest[i].startsWith("--")) positional.push(rest[i]);
+function formatStatus(report) {
+  const lines = [
+    `AI-first OS · ${report.owner} (${report.queuePaused ? "PAUSED" : "RUNNING"})`,
+    `Tasks: ${report.counts.active} active · ${report.counts.waiting} waiting · ${report.counts.done} done · ${report.counts.pendingApprovals} pending approvals`,
+    "",
+    "Agents:",
+    ...report.agents.map(a => `  - ${a.label.padEnd(13)} ${a.installed ? (a.signedIn ? "signed in" : "installed (sign-in needed)") : "not installed"}`),
+  ];
+  if (report.quotas.length) {
+    lines.push("", "Quota Cooldowns:");
+    for (const q of report.quotas) {
+      lines.push(`  - ${q.provider}: ${q.reason}${q.resetAt ? ` (resets ${new Date(q.resetAt).toLocaleTimeString()})` : ""}`);
     }
-    taskTitle = positional[0] || null;
-    const root = path.resolve(workspaceRoot);
-
-    if (cmd === "init") {
-      const answers = answersPath ? JSON.parse(fs.readFileSync(path.resolve(answersPath), "utf8")) : null;
-      const result = await runInit({ workspaceRoot: root, answers });
-      printJson({
-        ok: true,
-        vaultPath: result.vaultResult.root,
-        foldersCreated: result.vaultResult.foldersCreated.length,
-        filesWritten: result.vaultResult.filesWritten.length,
-        configsSynced: result.syncResult.written,
-      });
-      return;
+  }
+  if (report.tasks.length) {
+    lines.push("", "Recent Tasks:");
+    for (const t of report.tasks.slice(0, 8)) {
+      lines.push(`  - ${t.id} [${t.status}]${t.project ? ` (${t.project})` : ""}: ${t.title}`);
     }
+  }
+  return lines.join("\n") + "\n";
+}
 
-    if (cmd === "board") {
-      const manifest = requireManifest(root);
-      const rows = openBoard(manifest, root).listTasks({ to: targetAgent || undefined });
-      printJson({ ok: true, count: rows.length, rows });
-      return;
-    }
+function formatDoctor(report) {
+  const lines = [
+    `AI-first OS Doctor · ${report.ok ? "OK" : "ISSUES FOUND"}`,
+    `Profile: ${report.profilePath}`,
+    "",
+    ...report.checks.map(c => `  [${c.ok ? "OK" : "!!"}] ${c.name}: ${c.detail}`),
+  ];
+  return lines.join("\n") + "\n";
+}
 
-    if (cmd === "task") {
-      const manifest = requireManifest(root);
-      const added = openBoard(manifest, root).addTask({
-        id: taskId || undefined,
-        task: taskTitle,
-        to: targetAgent || manifest.roles?.builder || "claude",
-      });
-      printJson({ ok: true, task: added });
-      return;
-    }
+async function main(argv = process.argv.slice(2)) {
+  const { cmd, flags, positional } = parseArgs(argv);
 
-    if (cmd === "run") {
-      const manifest = requireManifest(root);
-      const board = openBoard(manifest, root);
-      const res = await dispatchBoardTask({
-        workspaceRoot: root,
-        manifest,
-        board,
-        notices: createNoticeBook({ dir: path.dirname(board.jsonPath) }),
-        taskId: taskId || taskTitle || null,
-        agent: targetAgent || null,
-      });
-      printJson({ ok: true, ...res });
-      return;
-    }
-
-    if (cmd === "audit") {
-      const manifest = requireManifest(root);
-      const board = openBoard(manifest, root);
-      if (!taskTitle) {
-        printJson({ ok: true, offers: auditOffers(board) });
-        return;
-      }
-      const res = requestAudit({
-        board,
-        manifest,
-        buildRowId: taskTitle,
-        availability: availabilityFromDetected(cachedDetect({ workspaceRoot: root })),
-        notices: createNoticeBook({ dir: path.dirname(board.jsonPath) }),
-      });
-      printJson({ ok: true, ...res });
-      return;
-    }
-
-    if (cmd === "ask") {
-      const manifest = requireManifest(root);
-      const board = openBoard(manifest, root);
-      const notices = createNoticeBook({ dir: path.dirname(board.jsonPath) });
-      const waiting = notices.listOpen().filter(n => n.choices.length);
-      if (!waiting.length) {
-        process.stdout.write("Nothing is waiting on you.\n");
-        return;
-      }
-      if (!process.stdin.isTTY) {
-        printJson({ ok: true, waiting });
-        return;
-      }
-      const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-      try {
-        for (const notice of waiting) {
-          process.stdout.write(`\n${notice.text}\n`);
-          notice.choices.forEach((c, i) => process.stdout.write(`  ${i + 1}. ${c.label}\n`));
-          const picked = Number((await rl.question("Pick one (Enter to skip): ")).trim());
-          if (!picked || !notice.choices[picked - 1]) continue;
-          answerNotice({
-            noticeId: notice.id,
-            value: notice.choices[picked - 1].value,
-            digest: notice.digest,
-            source: "computer",
-            notices,
-            board,
-            manifest,
-            saveManifest: makeSaver(root),
-            availability: availabilityFromDetected(cachedDetect({ workspaceRoot: root })),
-          });
-        }
-      } finally {
-        rl.close();
-      }
-      return;
-    }
-
-    if (cmd === "today") {
-      const manifest = requireManifest(root);
-      const board = openBoard(manifest, root);
-      const summary = buildDailySummary({ board, notices: createNoticeBook({ dir: path.dirname(board.jsonPath) }) });
-      process.stdout.write(`${summary.headline}\n`);
-      for (const f of summary.finished) process.stdout.write(`  ${f.by} finished: ${f.task}\n`);
-      for (const w of summary.waiting) process.stdout.write(`  Waiting on you: ${w.text}\n`);
-      return;
-    }
-
-    if (cmd === "undo") {
-      const manifest = requireManifest(root);
-      const row = applyUndo({ board: openBoard(manifest, root), row: positional[0], action: positional[1], routerName: manifest.ideology?.routerFunnel });
-      printJson({ ok: true, row });
-      return;
-    }
-
-    if (cmd === "role") {
-      const manifest = requireManifest(root);
-      const [role, agent] = positional;
-      const allowed = [...HARNESSES, ...(role === "orchestrator" ? PERSONAL_AGENTS : [])].map(a => a.id);
-      if (!["orchestrator", "builder", "auditor", "researcher"].includes(role) || !allowed.includes(agent)) {
-        throw new Error(`Usage: aios role <orchestrator|builder|auditor|researcher> <${allowed.join("|")}>`);
-      }
-      manifest.roles = { ...manifest.roles, [role]: agent };
-      if (role === "orchestrator") manifest.ideology.routerFunnel = labelFor(agent);
-      saveManifest(root, manifest);
-      printJson({ ok: true, roles: manifest.roles });
-      return;
-    }
-
-    if (cmd === "watch") {
-      await runWatch(root, requireManifest(root));
-      return;
-    }
-
-    if (cmd === "keep-alive") {
-      keepAlive({ cliPath: CLI_PATH, workspaceRoot: root });
-      return;
-    }
-
-    if (cmd === "autostart") {
-      requireManifest(root);
-      const options = { cliPath: CLI_PATH, workspaceRoot: root };
-      if (positional[0] === "on") printJson(installAutostart(options));
-      else if (positional[0] === "off") printJson(removeAutostart(options));
-      else printJson({ installed: isAutostartInstalled(options) });
-      return;
-    }
-
-    if (cmd === "phone") {
-      const manifest = requireManifest(root);
-      if (here) {
-        await setUpPhoneOnThisNetwork(manifest, root);
-        process.stdout.write(`\nOpen this on your phone (same Wi-Fi):\n\n${phoneLinkFor(manifest)}\n\n`);
-        await runWatch(root, manifest);
-        return;
-      }
-      const result = await connectPhone({ manifest, root, confirmCost: ({ question }) => confirmInTerminal(question) });
-      if (!result.ok) {
-        process.stdout.write(
-          result.code === "OWNER_SETUP_NEEDED"
-            ? "Phone access from anywhere is not switched on for this copy yet. For now, `aios phone --here` works on your Wi-Fi.\n"
-            : result.code === "COST_NOT_APPROVED"
-              ? "Nothing was created, and nothing was charged.\n"
-              : `${result.message || "Could not finish setting up your phone."}\n`
-        );
-        process.exitCode = 1;
-        return;
-      }
-      process.stdout.write(`${result.link}\n`);
-      return;
-    }
-
-    if (cmd === "sync") {
-      printJson({ ok: true, ...syncWorkspaceConfigs(requireManifest(root), root) });
-      return;
-    }
-
-    if (cmd === "doctor") {
-      const report = runDoctor({ workspaceRoot: root });
-      printJson(report);
-      if (!report.ok) process.exitCode = 1;
-      return;
-    }
-
-    if (cmd === "tui" || !cmd) {
-      let manifest = loadManifest(root);
-      if (!manifest) manifest = (await runInit({ workspaceRoot: root })).manifest;
-      const board = openBoard(manifest, root);
-      board.initBoard();
-      startTui({
-        workspaceRoot: root,
-        manifest,
-        board,
-        notices: createNoticeBook({ dir: path.dirname(board.jsonPath) }),
-        onSaveManifest: makeSaver(root),
-      });
-      return;
-    }
-
-    if (cmd === "desktop") {
-      const manifest = loadManifest(root);
-      const board = manifest ? openBoard(manifest, root) : null;
-      if (board) board.initBoard();
-      fs.mkdirSync(root, { recursive: true });
-      const saver = makeSaver(root);
-      let service = null;
-      const srv = createDesktopServer({
-        workspaceRoot: root,
-        manifest,
-        board,
-        onSaveManifest: saver,
-        phone: {
-          status: current => ({ connected: Boolean(current.backend && current.backend.kind !== "local"), link: current.backend && current.backend.kind !== "local" ? phoneLinkFor(current) : null }),
-          async connect(current, { approveCost }) {
-            const result = await connectPhone({ manifest: current, root, approveCost });
-            if (result.ok && result.newlyConnected) {
-              service?.stop();
-              service = await startHomeServices({ workspaceRoot: root, manifest: current, saveManifest: saver });
-            }
-            return result;
-          },
-        },
-        muse: createMuseConnection({ readSecret, saveManifest: saver, product: loadProductConfig() }),
-        async onIntroComplete({ selection, detected }) {
-          const made = await runInit({ workspaceRoot: root, answers: profileFromIntro(selection, detected), detected });
-          service = await startHomeServices({ workspaceRoot: root, manifest: made.manifest, saveManifest: saver });
-          return made;
-        },
-      });
-      await new Promise(r => srv.listen(0, "127.0.0.1", r));
-      if (manifest) service = await startHomeServices({ workspaceRoot: root, manifest, saveManifest: saver });
-      const url = `http://127.0.0.1:${srv.address().port}`;
-      process.stdout.write(`AI-first OS is open at ${url}\n`);
-      if (!noWindow) launchFramelessAppWindow(url);
-      process.on("SIGINT", () => {
-        service?.stop();
-        process.exit(0);
-      });
-      return;
-    }
-
-    if (cmd === "connect") {
-      const manifest = requireManifest(root);
-      if (!taskTitle) {
-        printJson({ ok: true, availableServices: SERVICE_DROPDOWN_CATALOG });
-        return;
-      }
-      const updated = connectServiceFromCatalog(manifest, taskTitle);
-      makeSaver(root)(updated.manifest);
-      printJson({ ok: true, connected: updated.connected });
-      return;
-    }
-
-    if (cmd === "share") {
-      const manifest = requireManifest(root);
-      const fallback = manifest.roles?.builder || "claude";
-      const target =
-        targetAgent ||
-        (await askOnceInTerminal({
-          manifest,
-          root,
-          key: "settings.shareTo",
-          question: "Who do you want to share with?",
-          choices: HARNESSES.map(h => ({ label: h.label, value: h.id })),
-          fallback,
-        }));
-      printJson(
-        shareToTarget({
-          target,
-          content: taskTitle,
-          workspaceRoot: root,
-          vaultPath: manifest.vaultPath,
-          board: openBoard(manifest, root),
-          routerName: manifest.ideology?.routerFunnel || "Router",
-        })
-      );
-      return;
-    }
-
-    if (cmd === "voice") {
-      const manifest = requireManifest(root);
-      const cap = captureVoiceNative({ timeoutSeconds: 8, mockTranscript: taskTitle || null });
-      if (!cap.ok || !cap.transcript) {
-        throw new Error(cap.error || "No speech detected.");
-      }
-      const saved = saveVoiceDumpToInbox({
-        vaultPath: manifest.vaultPath,
-        transcript: cap.transcript,
-        routerName: manifest.ideology?.routerFunnel || "Router",
-        board: openBoard(manifest, root),
-        autoQueueTo: targetAgent || manifest.roles?.builder || "claude",
-      });
-      printJson({ ok: true, transcript: cap.transcript, ...saved });
-      return;
-    }
-
+  if (cmd === "help" || cmd === "--help" || cmd === "-h") {
     process.stdout.write(HELP);
-  })().catch(err => {
+    return;
+  }
+
+  if (cmd === "init") {
+    const res = runInitProfile({
+      profileDir: flags.profileDir,
+      owner: flags.owner,
+      vault: flags.vault,
+      roots: flags.roots,
+      tailscale: flags.tailscale,
+    });
+    printJson(res);
+    return;
+  }
+
+  if (cmd === "doctor") {
+    const report = runDoctor({ profileDir: flags.profileDir });
+    if (flags.json) printJson(report);
+    else process.stdout.write(formatDoctor(report));
+    if (!report.ok) process.exitCode = 1;
+    return;
+  }
+
+  if (cmd === "status") {
+    const report = runStatus({ profileDir: flags.profileDir });
+    if (flags.json) printJson(report);
+    else process.stdout.write(formatStatus(report));
+    return;
+  }
+
+  if (cmd === "models") {
+    const profile = loadProfile({ profileDir: flags.profileDir });
+    const store = createStore({ dbPath: path.join(flags.profileDir, "os.db") });
+    seedBaselineModels(store);
+    try {
+      let report = null;
+      if (flags.refresh) {
+        const installed = detectHarnesses({ workspaceRoot: flags.profileDir }).filter(a => a.installed && a.headless).map(a => a.id);
+        report = await refreshModelCatalog({
+          store,
+          profile,
+          providers: installed,
+          listModelsForProvider: provider => listLiveModels(provider),
+        });
+      }
+      const models = store.listModels();
+      if (flags.json) {
+        printJson({ ok: true, report, models });
+      } else {
+        for (const m of models) {
+          process.stdout.write(`${m.provider.padEnd(12)} ${m.tier.padEnd(10)} ${m.modelId.padEnd(28)} ${m.status}${m.isDefault ? " [default]" : ""}\n`);
+        }
+      }
+    } finally {
+      store.close();
+    }
+    return;
+  }
+
+  if (cmd === "pause" || cmd === "resume") {
+    const profile = loadProfile({ profileDir: flags.profileDir });
+    const paused = cmd === "pause";
+    const remote = await tryDaemonPost(profile, paused ? "/api/v2/queue/pause" : "/api/v2/queue/resume", {});
+    if (remote) {
+      printJson(remote);
+      return;
+    }
+    const store = createStore({ dbPath: path.join(flags.profileDir, "os.db") });
+    try {
+      const q = store.setQueuePaused(paused);
+      printJson({ ok: true, queuePaused: q.paused });
+    } finally {
+      store.close();
+    }
+    return;
+  }
+
+  if (cmd === "chat" || cmd === "wake") {
+    const text = positional.join(" ").trim();
+    if (!text) throw new Error(`Usage: aios ${cmd} "<text>"`);
+    const profile = loadProfile({ profileDir: flags.profileDir });
+    const remote = await tryDaemonPost(profile, "/api/v2/chat", {
+      text,
+      taskId: flags.taskId || (/^T\d+$/i.test(text) ? text.toUpperCase() : null),
+      project: flags.project || null,
+      source: "cli",
+    });
+    if (remote) {
+      printJson(remote);
+      return;
+    }
+    const store = createStore({ dbPath: path.join(flags.profileDir, "os.db") });
+    try {
+      if (flags.taskId || (cmd === "wake" && /^T\d+$/i.test(text))) {
+        const targetId = (flags.taskId || text).toUpperCase();
+        const task = store.getTask(targetId);
+        if (!task) throw new Error(`Task ${targetId} not found.`);
+        if (cmd === "chat" || flags.taskId) {
+          store.addThreadMessage({ taskId: targetId, role: "user", agent: "cli", content: text });
+        }
+        const updated = store.updateTask(targetId, { status: "open" });
+        printJson({ ok: true, resumed: true, task: updated });
+      } else {
+        const projects = listAllProjects(profile);
+        const matched = resolveProject(flags.project || text, projects);
+        const task = store.createTask({
+          title: text.slice(0, 120),
+          text,
+          source: "cli",
+          projectName: matched?.name || null,
+          projectPath: matched?.path || null,
+          stakes: matched ? stakesForProject(matched, profile) : "standard",
+          status: "open",
+        });
+        if (!store.getThread(task.id).length) {
+          store.addThreadMessage({ taskId: task.id, role: "user", agent: "cli", content: text });
+        }
+        printJson({ ok: true, created: true, task });
+      }
+    } finally {
+      store.close();
+    }
+    return;
+  }
+
+  if (cmd === "logs") {
+    const id = (flags.taskId || positional[0] || "").toUpperCase();
+    if (!id) throw new Error("Usage: aios logs <taskId>");
+    const store = createStore({ dbPath: path.join(flags.profileDir, "os.db") });
+    try {
+      const task = store.getTask(id);
+      if (!task) throw new Error(`Task ${id} not found.`);
+      const thread = store.getThread(id);
+      const bus = store.getBusMessages(id);
+      if (flags.json) {
+        printJson({ ok: true, task, thread, bus });
+      } else {
+        process.stdout.write(`${task.id} · ${task.title} [${task.status} / ${task.stage}]\n`);
+        process.stdout.write(`Project: ${task.projectName || "unassigned"} (${task.stakes})\n\n--- Thread ---\n`);
+        for (const m of thread) process.stdout.write(`[${m.role}${m.agent ? "/" + m.agent : ""}] ${m.content}\n`);
+        if (bus.length) {
+          process.stdout.write("\n--- Terminal Agent Bus ---\n");
+          for (const b of bus) process.stdout.write(`[${b.fromAgent} -> ${b.toAgent} (${b.msgType})] ${JSON.stringify(b.payload)}\n`);
+        }
+        if (task.delivery) {
+          process.stdout.write(`\n--- Total Output ---\n${JSON.stringify(task.delivery, null, 2)}\n`);
+        }
+      }
+    } finally {
+      store.close();
+    }
+    return;
+  }
+
+  if (cmd === "phone") {
+    const profile = loadProfile({ profileDir: flags.profileDir });
+    const vault = createSecretVault();
+    let phoneToken = vault.get("AIOS_V2_PHONE_TOKEN");
+    if (!phoneToken) {
+      phoneToken = require("node:crypto").randomBytes(24).toString("base64url");
+      vault.set("AIOS_V2_PHONE_TOKEN", phoneToken);
+    }
+    const host = profile.transport?.tailscaleHost || "127.0.0.1";
+    const port = flags.port || profile.transport?.port || 4318;
+    const url = `http://${host}:${port}/#t=${encodeURIComponent(phoneToken)}`;
+    if (flags.json) printJson({ ok: true, url, mode: profile.transport?.tailscaleHost ? "tailscale-direct" : "local" });
+    else process.stdout.write(`Open on your phone (via Tailscale/LAN):\n${url}\n`);
+    return;
+  }
+
+  if (cmd === "keep-alive") {
+    keepAlive({ cliPath: CLI_PATH, profileDir: flags.profileDir });
+    return;
+  }
+
+  if (cmd === "autostart") {
+    const options = { cliPath: CLI_PATH, profileDir: flags.profileDir };
+    if (positional[0] === "on") printJson(installAutostart(options));
+    else if (positional[0] === "off") printJson(removeAutostart(options));
+    else printJson({ installed: isAutostartInstalled(options) });
+    return;
+  }
+
+  if (cmd === "desktop" || cmd === "daemon" || cmd === "watch") {
+    const daemon = createDaemon({ profileDir: flags.profileDir });
+    const started = await daemon.start({
+      host: flags.host,
+      port: Number.isFinite(flags.port) ? flags.port : null,
+    });
+    const profile = daemon.getProfile();
+    process.stdout.write(`AI-first OS v2 running at ${started.url}\n`);
+    if (profile.transport?.tailscaleHost) {
+      process.stdout.write(`Phone (Tailscale): http://${profile.transport.tailscaleHost}:${started.port}/#t=${encodeURIComponent(started.phoneToken)}\n`);
+    }
+    if (cmd === "desktop" && !flags.noWindow) {
+      launchAppWindow(started.url);
+    }
+    const stop = async () => {
+      await daemon.stop();
+      process.exit(0);
+    };
+    process.on("SIGINT", stop);
+    process.on("SIGTERM", stop);
+    return;
+  }
+
+  process.stdout.write(HELP);
+}
+
+if (require.main === module) {
+  main().catch(err => {
     process.stderr.write(`Error: ${err.message}\n`);
     process.exitCode = 1;
   });
 }
 
 module.exports = {
-  toSimpleYaml,
-  buildManifestFromProfile,
-  loadManifest,
-  syncWorkspaceConfigs,
-  runInit,
+  parseArgs,
+  launchAppWindow,
+  runInitProfile,
+  runStatus,
   runDoctor,
+  main,
 };

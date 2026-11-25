@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="referrer" content="no-referrer" />
+<meta name="theme-color" content="#09090b" />
+<title>AI-first OS</title>
+<link rel="icon" href="/brand/logo.png" />
+<link rel="stylesheet" href="/app.css" />
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <button type="button" id="drawerToggle" class="icon-btn" aria-label="Threads and projects">☰</button>
+    <img src="/brand/logo.png" alt="" class="logo" onerror="this.hidden=true" />
+    <strong>AI-first OS</strong>
+  </div>
+  <div class="top-actions">
+    <button type="button" id="newBtn" class="btn ghost">New</button>
+    <button type="button" id="healthBtn" class="btn ghost">System</button>
+    <button type="button" id="pauseBtn" class="btn danger-ghost">Stop all</button>
+  </div>
+</header>
+
+<div id="pauseBanner" class="pause-banner" hidden role="alert">
+  <span>Queue is paused. New requests will wait until you resume.</span>
+  <button type="button" id="resumeBtn" class="btn primary small">Resume</button>
+</div>
+
+<div class="shell">
+  <aside id="sidebar" class="sidebar" aria-label="Threads">
+    <div class="sidebar-head">
+      <span>Threads</span>
+      <button type="button" id="sidebarClose" class="icon-btn mobile-only" aria-label="Close">✕</button>
+    </div>
+    <div id="threadList" class="thread-list"></div>
+  </aside>
+
+  <main class="stage">
+    <section id="emptyState" class="empty-state">
+      <h1>What do you want to build?</h1>
+      <p class="muted">Describe an idea, a bug, or a change. Intake clarifies what matters, the right flagship plans it, a builder ships it in an isolated worktree, and a second model verifies the diff.</p>
+    </section>
+
+    <section id="focusView" class="focus-view" hidden>
+      <div class="task-header">
+        <div class="task-meta-row">
+          <span id="taskIdBadge" class="pill"></span>
+          <span id="taskProjectBadge" class="pill muted-pill" hidden></span>
+          <span id="taskStakesBadge" class="pill" hidden></span>
+        </div>
+        <h2 id="taskTitle"></h2>
+        <div id="pipelineBar" class="pipeline-bar"></div>
+        <p id="liveStatus" class="live-status" hidden></p>
+      </div>
+
+      <div id="approvalZone" class="card-stack"></div>
+      <div id="deliveryZone" class="card-stack"></div>
+      <div id="conversation" class="conversation"></div>
+
+      <details id="busDrawer" class="bus-drawer" hidden>
+        <summary>Terminal agent dialogue (<span id="busCount">0</span>)</summary>
+        <div id="busList" class="bus-list"></div>
+      </details>
+
+      <details id="diffDrawer" class="bus-drawer" hidden>
+        <summary>Plan &amp; ground-truth diff</summary>
+        <pre id="planPre" class="code-box" hidden></pre>
+        <pre id="diffPre" class="code-box" hidden></pre>
+      </details>
+
+      <div id="taskControls" class="task-controls" hidden>
+        <button type="button" id="stopOneBtn" class="btn secondary small" hidden>Stop this</button>
+        <button type="button" id="continueBtn" class="btn primary small" hidden>Continue</button>
+        <button type="button" id="putAwayBtn" class="btn ghost small" hidden>Put away</button>
+      </div>
+    </section>
+
+    <form id="composer" class="composer">
+      <textarea id="composerInput" rows="2" maxlength="16000" placeholder="Tell AI-first OS what to build, check, or answer…"></textarea>
+      <div class="composer-foot">
+        <span id="composerHint" class="muted tiny">Enter sends · Shift+Enter new line</span>
+        <div class="composer-btns">
+          <button type="button" id="voiceBtn" class="btn ghost small">Voice</button>
+          <button type="submit" id="sendBtn" class="btn primary">Send</button>
+        </div>
+      </div>
+      <p id="statusMsg" class="status-msg" role="status"></p>
+    </form>
+  </main>
+</div>
+
+<dialog id="healthModal" class="modal">
+  <div class="modal-box">
+    <div class="modal-head">
+      <h3>System Health &amp; Subscriptions</h3>
+      <button type="button" class="icon-btn" id="closeHealth">✕</button>
+    </div>
+    <div class="modal-body">
+      <section class="health-section">
+        <div class="section-head">
+          <h4>Terminal Subscriptions</h4>
+          <button type="button" id="refreshModelsBtn" class="btn secondary small">Check new models</button>
+        </div>
+        <div id="harnessList" class="kv-list"></div>
+      </section>
+
+      <section class="health-section">
+        <h4>Active Model Tiers</h4>
+        <div id="modelList" class="kv-list"></div>
+      </section>
+
+      <section class="health-section">
+        <h4>Connected Services (1-Link Sign-In)</h4>
+        <div id="serviceList" class="kv-list"></div>
+      </section>
+
+      <section class="health-section">
+        <h4>Projects &amp; Stakes</h4>
+        <div id="projectList" class="kv-list"></div>
+      </section>
+
+      <section class="health-section">
+        <h4>Phone &amp; Intake Connectors (Muse / GrokBot)</h4>
+        <div id="connectorZone" class="kv-list"></div>
+        <div id="phoneQrWrap" class="qr-wrap" hidden>
+          <img id="phoneQrImg" alt="Phone pairing QR code" />
+          <input id="phoneUrlInput" readonly />
+        </div>
+      </section>
+    </div>
+  </div>
+</dialog>
+
+<script src="/app.js"></script>
+</body>
+</html>

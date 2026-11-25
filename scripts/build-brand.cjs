@@ -255,16 +255,14 @@ function build({ outputs = ROOT } = {}) {
     return target;
   };
   const logo = encodePng(512, renderLevels(512, REST));
-  const frames = Array.from({ length: TOTAL_FRAMES }, (_, i) => renderFrame(256, i));
   return {
-    logo: [write("assets/logo-512.png", logo), write("phone/logo.png", logo)],
-    gif: write("phone/loading.gif", encodeGif(256, frames, FRAME_CS)),
+    logo: [write("assets/logo-512.png", logo)],
   };
 }
 
 if (require.main === module) {
   const built = build();
-  process.stdout.write(`${built.gif} (${fs.statSync(built.gif).size} bytes, ${TOTAL_FRAMES} frames)\n`);
+  process.stdout.write(`${built.logo[0]} (${fs.statSync(built.logo[0]).size} bytes)\n`);
 }
 
 module.exports = { build, renderFrame, encodePng, encodeGif, stateAt, TOTAL_FRAMES, ORBIT_FRAMES, SETTLE_FRAMES, DRAW_FRAMES };

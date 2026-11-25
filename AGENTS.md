@@ -1,57 +1,52 @@
-# AGENTS.md - AI-first OS Repository Guide
+# AGENTS.md — AI-first OS v2 Repository Guide
 
-This repository is **AI-first OS** (`https://github.com/cimbolicproductions/ai-first-os`), a zero-dependency Node.js (`v22+`) keyboard-first multi-agent control plane.
+This repository is **AI-first OS** (`https://github.com/cimbolicproductions/ai-first-os`), a zero-dependency Node.js (`v22+`) chat-first multi-agent operating system and local daemon.
 
 ## File Map
 
-- `bin/aios.cjs` (`bin/fleet.cjs` alias): CLI entrypoint.
-- `lib/harness-registry.cjs`: The open harness list. One entry per agent: finding it, sign-in, running work, models, hotkey, and optionally `browser` (can work in the owner's own Chrome), `free` (no account needed), `install` (how the app adds it), `run.stream` (a live step stream) and `run.fallbackModels`. OpenCode is the free agent: it runs free models, DeepSeek first, picked from its own list.
-- `lib/browser-guard.cjs`: The fence around a browser job. Claude Code runs it as a hook before and after every browser step; a step outside "set two nameservers for one domain" is refused by this program (exit code 2): the job works in the one tab it opens, that tab may only be sent to that domain's control panel page (compared after parsing), and where the tab really is comes from the "Tab Context" Chrome reports after every step; once the tab is anywhere but the domain's page (Namecheap's login page, for a signed-out browser) it may only look and close. Only two kinds of change exist: a plain left click by ref, and form_input with one of the two nameservers or Custom DNS. No keys, no typing, no double clicks, no positions, no modifiers. A change needs Chrome's report that the tab is on the domain's page, and a reading (read_page or find) taken there after the last change finished; the change uses that reading up. One change in flight at a time, and no change while a reading is in flight, so batched steps cannot slip past each other. An element qualifies if its own label names nameservers or Custom DNS, or it is a plain Save or Add button whose surroundings (find's "in" text) are the Nameservers section; money, renewal, ordering, confirming, add-ons, privacy, email, transfer and account words in the label or surroundings rule it out, as do toggles and links that leave the page. The job's own tab on a cart or payment address stops the job. Anything it cannot read is refused. A look-only mode (`guardSettings({ lookOnly: true })`) allows reading and closing only. Checked live in real Chrome on 2026-11-13. Only agents with `browser.guarded === true` (Claude Code) are offered or run for a browser job at all; Codex's browser tool runs its own scripts, so it is not used.
-- `lib/no-purchase.cjs`: Keeps build agents from buying anything from the command line. One list of buying commands (`vercel domains buy`, `domains transfer-in`, Marketplace installs, Vercel's registrar API, Namecheap's register/renew/transfer API calls) is read two ways: Claude Code runs this file as a hook before every Bash or PowerShell command (exit 2 refuses; anything it cannot read is refused too), and OpenCode gets the same list as its own deny rules through `OPENCODE_CONFIG_CONTENT`. The runner writes Claude Code's settings to a temporary file per run (inline JSON does not survive `claude.cmd`) and does not start the run if it cannot. Codex's write sandbox is pinned to no internet. Antigravity and Cursor have no per-command block here; for them it is their instructions only. Checked live with harmless `echo` commands on 2026-11-14 (Claude Code and OpenCode refused; Codex was out of usage, so its pin is unverified live).
-- `lib/install.cjs`: Adds or updates a listed tool (an agent, or a service's sign-in tool) on the owner's press. Fixed package names only.
-- `lib/agent-auth.cjs`: Detects harnesses and sign-in state from the registry.
-- `lib/roles.cjs`: Default role slate, routing, substitution, audit pairing.
-- `lib/os-runtime.cjs`: Work orders, dispatch, report parsing, `answerNotice`, board watcher.
-- `lib/notices.cjs`: Every question or update for a person. All surfaces read this one book. A notice may carry `copy` (up to four short values shown as copy buttons) `reply: true` (the organizer's question, answered in words: raised by `dispatchBoardTask` whenever a request ends up awaiting a reply, replaced by a newer one, closed by `replyToOrganizer`; the phone answers it with an ordinary request, "Reply for P30: ...", taken once by `lib/cloud-link.cjs`), and `back: true` (the end of something the owner was waiting on, such as a sign-in or an install: the desktop page shows one system notification that brings them back to the chat when they are in another window, and the phone is rung). An agent's own sign-in window is watched by `watchSignIn` in `lib/os-runtime.cjs`, so the waiting task starts the moment it finishes.
-- `lib/audit-loop.cjs`: The Audit action and findings-to-fix-tasks loop.
-- `lib/versions.cjs`: Versions of a build. Owner notes and review findings are combined into one brief for the next version.
-- `lib/connect.cjs`: Service sign-ins run in the background; the approval link shows in the app and on the phone, and waiting work resumes when approved.
-- `lib/ship.cjs`: New project folders, saving a version, the private GitHub repository and the Vercel address (production deploys). Only for projects the OS created. Asks before anything leaves the computer.
-- `lib/domains.cjs`: A project's own web address. Finds free names (Namecheap API with prices when connected, the public RDAP registry record otherwise), opens Namecheap's checkout, watches for the purchase, then sets Vercel's nameservers: Namecheap's API when connected; otherwise, by default, the one-link step (`handOff`): a card with a button straight to that name's control panel page, also opened on the computer, the two nameservers as copy buttons (`copy` on a notice, shown on the computer and the phone), and Done, which the RDAP record checks before `attachToVercel`. An agent in the owner's signed-in Chrome (only fenced ones, `browser.guarded === true`) runs only when the owner chooses "Have ... do it" on that card, or sets `settings.domains.agentPoints` to "yes". No agent clicks anything in Namecheap by default. Success is decided by the RDAP registry record, never the agent's report. Never buys anything. The Namecheap key goes only to the keyring and only in request bodies. Browser jobs refuse to start under the test runner (`NODE_TEST_CONTEXT`).
-- `lib/qr.cjs`: Zero-dependency QR encoder (byte mode, level M, versions 1 to 40) for the phone link.
-- `lib/sheet-board.cjs`: Creates the owner's board Sheet and mirrors the local board into it. The local board stays the engine. Once a minute it reads the Sheet back: a line typed at the bottom becomes a request, a Status set to Done or Open is applied, and a note on a finished build goes into its next version. The board wins whenever it has moved on.
-- `lib/activity.cjs`: The short live line of what each working agent is doing. Kept beside the board, never in it. Reads Claude Code's and Codex's step streams; other agents show their latest plain line.
-- `lib/project-brief.cjs`: One brief per project in the vault, written by the software as work lands.
-- `lib/projects.cjs`: Finds the owner's project folders and GitHub names so work runs in the right place without asking.
-- `lib/first-run.cjs`, `lib/first-run-page.cjs`: The three-window introduction.
-- `lib/desktop-hud.cjs`, `lib/shell-tui.cjs`: Desktop app and terminal shell.
-- `lib/relay-core.cjs`: Phone/computer meeting point. Web-standard APIs only, no imports, because it also runs in a Supabase Edge Function.
-- `lib/relay-host.cjs`: File store, local server, and the generated Edge Function.
-- `lib/cloud-link.cjs`, `lib/home-service.cjs`: Home machine heartbeat, intake, outbox, background service.
-- `lib/backend-provision.cjs`: Creates the user's backend behind one sign-in. Stops at any possible cost. `updateRelay` redeploys only the relay code (no new tokens, no re-pairing) when an older relay lacks newer routes; `RELAY_VERSION` in `relay-core.cjs` comes back on every heartbeat.
-- `lib/focus.cjs`: Selects and saves the desktop request in Focus in `board/ui.json`. Desktop choices and approvals require the matching request in Focus and the current notice digest. The design and security rules are in `docs/one-thing-at-a-time.md`.
-- `lib/muse-connect.cjs`: Connect Muse. Makes Muse's key on the owner's press, sends only its hash to the relay (`POST connector`, home only), shows the key once and never saves it. Muse's own key reaches exactly two relay routes, `POST requests` (atomic by idempotency key through `claimState`) and `POST status`; `GET museapi` is the public OpenAPI description, served only while Muse is connected. `lib/cloud-link.cjs` adopts each Muse request once (`deduplicateSource` in the board's lock) and reports its state back with `POST agentstatus` before acknowledging it.
-- `lib/autostart.cjs`, `lib/web-push.cjs`, `lib/daily-summary.cjs`, `lib/vault-options.cjs`, `lib/vault-bootstrap.cjs`, `lib/keyring.cjs`, `lib/ideology.cjs`, `lib/workspace.cjs`.
-- `adapters/local-board.cjs`, `adapters/sheets-board.cjs`, `adapters/doorbell.cjs`: Boards and the content-free doorbell.
-- `phone/`: The static phone page, published from the `gh-pages` branch. Republish that branch when this folder changes.
-- `helper/`: The small server function that keeps the Supabase app secret and finishes sign-ins. Deployed separately to Vercel.
-- `scripts/build-installer.cjs`: Builds the one-click installers.
-- `scripts/build-brand.cjs`: Draws the logo and the loading animation from one set of geometry.
-- `product.json`: Product-level switches the owner sets (`phoneAppUrl`, `signInHelperUrl`).
-- `os/`: Window tiling and hotkey configs.
+### CLI & Scripts
+- `bin/aios.cjs` (`bin/fleet.cjs` alias): Unified CLI entrypoint (`desktop`, `daemon`, `chat`, `wake`, `status`, `logs`, `pause`, `resume`, `models`, `phone`, `doctor`, `init`, `autostart`, `keep-alive`).
+- `scripts/build-installer.cjs`: Builds self-contained per-platform installers into `dist/`.
+- `scripts/preview-server.cjs`: Launches a throwaway preview daemon with mock agents on port 4701.
+- `scripts/build-brand.cjs`: Generates `assets/logo-512.png` from pure geometry.
 
-## Rules When Building Here
+### Core v2 Engine (`lib/v2/`)
+- `lib/v2/profile.cjs`: External `~/.aios/profile.json`, multi-root repo discovery (depth 2), fuzzy alias resolution, `critical|standard|sandbox` stakes & merge policies, managed project creation.
+- `lib/v2/store.cjs`: Native `node:sqlite` WAL database (`~/.aios/os.db`) owning tasks, chat threads, terminal agent bus logs, provider quotas, model catalog, digest-bound approvals, and crash recovery.
+- `lib/v2/worktree.cjs`: Isolated git worktrees (`aios/<taskId>`), upstream freshness checks, full diffs including untracked files, safe commit/merge, and per-project concurrency locks.
+- `lib/v2/quota.cjs`: Persisted multi-provider quota & auth-expiry classification (handles timezone-aware clock resets, ISO-8601, relative windows).
+- `lib/v2/model-catalog.cjs`: Live model discovery, tier classification (`apex > workhorse > balanced > fast-free`), canary probes, 1-tap promotion cards, cross-provider effort mapping.
+- `lib/v2/router.cjs`: Stakes-by-stage auto-router with unlimited provider failover, intelligence floors (no weak/free drop or self-audit on `critical`), and escalation on stalled fix rounds.
+- `lib/v2/harnesses.cjs`: Unified 6-CLI runner (`claude`, `codex`, `antigravity`, `gemini`, `opencode`, `cursor`) with non-interactive flags, effort flags, and structured output extraction.
+- `lib/v2/agent-bus.cjs`: Per-task run directories (`~/.aios/runs/<taskId>/`), secret-checked cross-repo read-only reference staging, and Obsidian vault delivery sync.
+- `lib/v2/pipeline.cjs`: Adaptive 3-stage pipeline (`intake -> planning -> building <-> planner bus -> auditing <-> fix loop -> commit/merge -> Total Output`), continuation matching, and concurrent `tickQueue`.
+- `lib/v2/auth-broker.cjs`: Unified 1-link sign-in/OAuth/device-code broker with cached OS keyring storage and automatic task resume.
+- `lib/v2/connectors.cjs`: Bidirectional Muse/GrokBot Intake v2, OpenAPI 3.1 spec generator, GrokBot detection, and optional thin Google Sheet sync plugin.
+- `lib/v2/transport.cjs`: SSH `.wake` queue watcher, Tailscale/loopback listen config, Bearer token + loopback CSRF protection.
+- `lib/v2/daemon.cjs`: Unified HTTP/SSE daemon serving the responsive UI, `/auth` capture page, `/api/v2/*` endpoints, SSE event stream, and phone QR pairing.
+- `lib/v2/leak-guard.cjs`: Public-repo privacy & secret hygiene scanner (rejects secrets, Tailscale IPs, personal drive paths, OS usernames, real Sheet IDs, and Supabase project refs).
 
-1. **Zero runtime npm dependencies.** Use Node 22+ built-ins.
-2. **Never put board or user text on a command line.** Prompts go over stdin or into a work-order file. See `buildSpawnPlan`.
-3. **The doorbell stays content-free:** row, event, from, machine, timestamp only.
-4. **User-facing words are plain.** No key formats, dashboards, or settings pages. A missing choice becomes a notice, not a failure.
-5. **Public repo hygiene.** No secrets, `.env` files, personal IDs, or machine usernames. Test 4 scans the repo.
-6. Hard gates stay hard: no spending, external sends, or public submissions without the owner's explicit approval.
-7. **A test reaches nothing real.** Agent runs, sign-ins, installs, GitHub, Vercel, the keyring, the network and browser jobs all refuse to start under the test runner (`underTest()` in `lib/harness-registry.cjs`) unless the test passes its own stand-in. A new side effect gets the same guard.
-8. **Building needs a project folder.** Work the organizer sends to a builder always names a project, or a new one that `createProject` really started (git said so and `.git/HEAD` exists). With neither, the organizer asks which project; a builder never runs in this app's own folder.
-9. **Never take an agent's word for what a check can confirm.** The registry record decides a nameserver change; the site answering from Vercel decides that it is live; GitHub decides whether a repository is private before every push.
-10. **No agent buys anything.** A new command or API that can spend money goes into `PURCHASE_PHRASES` in `lib/no-purchase.cjs`, and a new build agent with a shell gets a block of its own before it is offered.
+### Responsive UI (`lib/ui/`)
+- `lib/ui/index.html`, `lib/ui/app.css`, `lib/ui/app.js`: Single calm chat-first UI serving both desktop and phone with SSE live updates, pipeline stage chips, digest-bound approval cards, 1-tap auth links, Total Output delivery cards, collapsible Terminal Agent Bus & Git Diff drawers, and System Health modal.
+
+### Shared Infrastructure (`lib/`)
+- `lib/harness-registry.cjs`: Process spawning plans (`buildSpawnPlan`), process tree termination (`stopProcessTree`), test guards (`underTest`), binary fallback paths.
+- `lib/agent-auth.cjs`: Binary discovery (`locateBinary`) and sign-in detection.
+- `lib/no-purchase.cjs`: Purchase-prevention hooks and deny configs for coding agents.
+- `lib/keyring.cjs`: Cross-platform OS keyring read/write with in-memory caching and directory secret scanning.
+- `lib/activity.cjs`: Stream parsers for Claude Code and Codex activity lines.
+- `lib/qr.cjs`: Zero-dependency QR SVG encoder for phone pairing.
+- `lib/autostart.cjs`: Cross-platform sign-in autostart and crash-backoff `keepAlive`.
+- `lib/relay-core.cjs`, `lib/relay-host.cjs`, `lib/backend-provision.cjs`, `lib/web-push.cjs`, `lib/codex-sheet-transport.cjs`: Optional public cloud relay, push, and sheet transport modules.
+
+## Engineering Rules
+
+1. **Zero runtime npm dependencies.** Use Node 22+ built-ins (`node:sqlite`, `node:http`, `node:crypto`, etc.).
+2. **Public repo privacy is mandatory.** Never commit personal paths, usernames, Tailscale IPs, Sheet IDs, business names, or secrets. `lib/v2/leak-guard.cjs` verifies the repo in tests.
+3. **Never pass untrusted user/board text on command lines.** Pass prompts via stdin or run-space files (`~/.aios/runs/<taskId>/`).
+4. **Tests touch nothing real.** Never launch live AI CLIs, browsers, keyrings, or external network requests during `npm test` (`underTest()` guards enforce this).
+5. **No agent purchases anything.** Keep `lib/no-purchase.cjs` enforced across coding harnesses.
+6. **Hard gates stay hard.** `critical` repos never self-audit, never silently drop to weak/free tiers, and require explicit digest-bound approval before merging.
 
 ## Verification
 

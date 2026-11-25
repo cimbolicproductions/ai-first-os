@@ -11,7 +11,7 @@ const path = require("node:path");
  */
 
 const ROOT = path.join(__dirname, "..");
-const INCLUDE = ["bin", "lib", "adapters", "phone", "os", "product.json", "package.json", "LICENSE", "README.md"];
+const INCLUDE = ["bin", "lib", "assets", "product.json", "package.json", "LICENSE", "README.md"];
 const NODE_MAJOR = 22;
 
 function collectFiles() {
@@ -42,7 +42,7 @@ const home = process.env.AIOS_HOME || os.homedir();
 const installRoot = process.env.AIOS_INSTALL_ROOT || path.join(home, ".ai-first-os");
 const appDir = path.join(installRoot, "app");
 const next = path.join(installRoot, "app.next");
-const workspace = process.env.AIOS_WORKSPACE || path.join(home, "AI-first OS");
+const profileDir = process.env.AIOS_PROFILE_DIR || path.join(home, ".aios");
 
 fs.rmSync(next, { recursive: true, force: true });
 for (const [rel, data] of Object.entries(files)) {
@@ -52,7 +52,7 @@ for (const [rel, data] of Object.entries(files)) {
 }
 fs.rmSync(appDir, { recursive: true, force: true });
 fs.renameSync(next, appDir);
-fs.mkdirSync(workspace, { recursive: true });
+fs.mkdirSync(profileDir, { recursive: true });
 
 const cli = path.join(appDir, "bin", "aios.cjs");
 const desktopDir = path.join(home, "Desktop");
@@ -61,23 +61,23 @@ if (!process.env.AIOS_NO_SHORTCUT) {
   if (process.platform === "win32") {
     const opener = path.join(installRoot, "open.vbs");
     const q = v => '""' + v + '""';
-    fs.writeFileSync(opener, 'CreateObject("WScript.Shell").Run "' + [process.execPath, cli, "desktop", "--dir", workspace].map(q).join(" ") + '", 0, False\r\n');
+    fs.writeFileSync(opener, 'CreateObject("WScript.Shell").Run "' + [process.execPath, cli, "desktop", "--profile-dir", profileDir].map(q).join(" ") + '", 0, False\r\n');
     const script = "$s=(New-Object -ComObject WScript.Shell).CreateShortcut([Environment]::GetFolderPath('Desktop')+'\\AI-first OS.lnk');$s.TargetPath='wscript.exe';$s.Arguments='\"" + opener + "\"';$s.Save()";
     spawnSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script], { windowsHide: true });
   } else if (process.platform === "darwin") {
     fs.mkdirSync(desktopDir, { recursive: true });
     const shortcut = path.join(desktopDir, "AI-first OS.command");
-    fs.writeFileSync(shortcut, '#!/bin/sh\nexec "' + process.execPath + '" "' + cli + '" desktop --dir "' + workspace + '"\n', { mode: 0o755 });
+    fs.writeFileSync(shortcut, '#!/bin/sh\nexec "' + process.execPath + '" "' + cli + '" desktop --profile-dir "' + profileDir + '"\n', { mode: 0o755 });
   } else {
     const apps = path.join(home, ".local", "share", "applications");
     fs.mkdirSync(apps, { recursive: true });
-    fs.writeFileSync(path.join(apps, "ai-first-os.desktop"), '[Desktop Entry]\nType=Application\nName=AI-first OS\nExec="' + process.execPath + '" "' + cli + '" desktop --dir "' + workspace + '"\nTerminal=false\n');
+    fs.writeFileSync(path.join(apps, "ai-first-os.desktop"), '[Desktop Entry]\nType=Application\nName=AI-first OS\nExec="' + process.execPath + '" "' + cli + '" desktop --profile-dir "' + profileDir + '"\nTerminal=false\n');
   }
 }
 
 console.log("AI-first OS is installed.");
 if (!process.env.AIOS_NO_LAUNCH) {
-  const child = spawn(process.execPath, [cli, "desktop", "--dir", workspace], { detached: true, stdio: "ignore", windowsHide: true });
+  const child = spawn(process.execPath, [cli, "desktop", "--profile-dir", profileDir], { detached: true, stdio: "ignore", windowsHide: true });
   child.unref();
 }
 `;

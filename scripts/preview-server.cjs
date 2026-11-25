@@ -1,24 +1,26 @@
 #!/usr/bin/env node
 "use strict";
 
-// Runs the desktop app in a throwaway folder on a fixed port, for trying the screens.
+// Runs AI-first OS v2 in a temporary profile directory with a mock runner for UI previews.
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
-const { createDesktopServer } = require("../lib/desktop-hud.cjs");
-const { runInit } = require("../bin/aios.cjs");
-const { profileFromIntro } = require("../lib/first-run.cjs");
-const { saveManifest } = require("../lib/workspace.cjs");
+const { createDaemon } = require("../lib/v2/daemon.cjs");
 
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), "aios-preview-"));
-const server = createDesktopServer({
-  workspaceRoot: dir,
-  onSaveManifest: next => saveManifest(dir, next),
-  runner: async () => ({ status: "Done", note: "Preview run: nothing was really done." }),
-  async onIntroComplete({ selection, detected }) {
-    return runInit({ workspaceRoot: dir, answers: profileFromIntro(selection, detected), detected });
-  },
+const daemon = createDaemon({
+  profileDir: dir,
+  runner: async ({ stage, prompt }) => ({
+    ok: true,
+    output: JSON.stringify({
+      stage,
+      status: stage === "audit" ? "clean" : "ready",
+      summary: `Preview ${stage} complete for: ${String(prompt).slice(0, 80)}`,
+      findings: [],
+    }),
+  }),
 });
-server.listen(Number(process.env.PORT || 4701), "127.0.0.1", () => {
-  process.stdout.write(`Preview at http://127.0.0.1:${server.address().port}\n`);
+
+daemon.start({ host: "127.0.0.1", port: Number(process.env.PORT || 4701) }).then(started => {
+  process.stdout.write(`AI-first OS v2 preview at ${started.url}\n`);
 });

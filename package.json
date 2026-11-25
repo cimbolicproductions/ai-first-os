@@ -1,7 +1,7 @@
 {
   "name": "ai-first-os",
-  "version": "1.2.0",
-  "description": "AI-first OS: one board for all your AI agents, with role routing, a builder and auditor loop, and a phone front door.",
+  "version": "2.0.0",
+  "description": "AI-first OS: unified chat-first control plane for terminal coding agents, cross-model planning/building/auditing, adaptive quota failover, and 1-link sign-in.",
   "private": false,
   "license": "MIT",
   "engines": {
@@ -13,20 +13,16 @@
     "fleet": "./bin/fleet.cjs"
   },
   "scripts": {
-    "start": "node bin/aios.cjs tui",
-    "tui": "node bin/aios.cjs tui",
+    "start": "node bin/aios.cjs desktop",
     "desktop": "node bin/aios.cjs desktop",
-    "init": "node bin/aios.cjs init",
-    "connect": "node bin/aios.cjs connect",
-    "share": "node bin/aios.cjs share",
-    "voice": "node bin/aios.cjs voice",
-    "board": "node bin/aios.cjs board",
-    "task": "node bin/aios.cjs task",
-    "run": "node bin/aios.cjs run",
-    "watch": "node bin/aios.cjs watch",
-    "sync": "node bin/aios.cjs sync",
+    "daemon": "node bin/aios.cjs daemon",
+    "watch": "node bin/aios.cjs daemon",
+    "chat": "node bin/aios.cjs chat",
+    "status": "node bin/aios.cjs status",
+    "models": "node bin/aios.cjs models",
+    "phone": "node bin/aios.cjs phone",
     "doctor": "node bin/aios.cjs doctor",
-    "test": "node --test --test-concurrency=1",
+    "test": "node --no-warnings --test --test-concurrency=1",
     "build:installer": "node scripts/build-installer.cjs"
   }
 }
