@@ -28,7 +28,8 @@
   <button type="button" id="resumeBtn" class="btn primary small">Resume</button>
 </div>
 
-<div class="shell">
+<div id="shell" class="shell">
+  <div id="sidebarBackdrop" class="sidebar-backdrop" hidden></div>
   <aside id="sidebar" class="sidebar" aria-label="Threads">
     <div class="sidebar-head">
       <span>Threads</span>
@@ -123,7 +124,8 @@
       </section>
 
       <section class="health-section">
-        <h4>Active Model Tiers</h4>
+        <h4>Models &amp; Effort</h4>
+        <p class="muted tiny">Stays on your chosen model per provider and scales reasoning effort instead of downgrading to older models.</p>
         <div id="modelList" class="kv-list"></div>
       </section>
 

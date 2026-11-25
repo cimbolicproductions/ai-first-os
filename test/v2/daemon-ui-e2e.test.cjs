@@ -116,6 +116,24 @@ test("unified daemon serves single responsive UI, enforces auth, runs full chat 
     assert.ok(buildStep?.activities.includes("Editing main.js"));
     assert.equal(fs.readFileSync(path.join(repo, "main.js"), "utf8").replace(/\r\n/g, "\n"), "console.log('v2');\n");
 
+    // 5. Model selection & removal APIs update profile + catalog cleanly.
+    const selectRes = await fetch(`${started.url}/api/v2/models/select`, {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: started.url },
+      body: JSON.stringify({ provider: "codex", modelId: "gpt-6.3-sol" }),
+    }).then(r => r.json());
+    assert.equal(selectRes.ok, true);
+    assert.equal(daemon.getProfile().models.overrides.codex, "gpt-6.3-sol");
+
+    const removeRes = await fetch(`${started.url}/api/v2/models/remove`, {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: started.url },
+      body: JSON.stringify({ provider: "codex", modelId: "gpt-6.3-sol" }),
+    }).then(r => r.json());
+    assert.equal(removeRes.ok, true);
+    assert.ok(daemon.getProfile().models.removedModels.includes("codex:gpt-6.3-sol"));
+    assert.equal(daemon.getProfile().models.overrides.codex, "gpt-6.2-sol");
+
     // 4. Enable Muse connector -> Muse gets its own bearer token -> scoped ONLY to intake routes!
     const museSetup = await fetch(`${started.url}/api/v2/connectors/token`, {
       method: "POST",

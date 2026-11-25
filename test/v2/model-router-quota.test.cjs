@@ -79,6 +79,15 @@ test("model catalog classifies apex above workhorse, canary-verifies new models,
     store.setDefaultModel("codex", "workhorse", "gpt-6.3-sol");
     const after = resolveModelForProvider({ store, profile: {}, provider: "codex", desiredTier: "workhorse", desiredEffort: "high" });
     assert.equal(after.modelId, "gpt-6.3-sol");
+
+    // Effort-first guarantee: even for balanced/low-effort work, Codex stays on newest non-apex workhorse and scales effort instead of downgrading!
+    const lowEffort = resolveModelForProvider({ store, profile: {}, provider: "codex", desiredTier: "balanced", desiredEffort: "low" });
+    assert.equal(lowEffort.modelId, "gpt-6.3-sol");
+    assert.equal(lowEffort.effort, "low");
+
+    // Disabling a provider cleanly excludes it from selection.
+    const disabled = resolveModelForProvider({ store, profile: { models: { disabledProviders: ["codex"] } }, provider: "codex", desiredTier: "workhorse", desiredEffort: "high" });
+    assert.equal(disabled.disabled, true);
   } finally {
     store.close();
   }

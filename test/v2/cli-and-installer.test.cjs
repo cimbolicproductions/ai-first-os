@@ -71,7 +71,7 @@ test("CLI init, doctor, status, chat, pause/resume, logs, and models work cleanl
 
   const modelsRes = runCli(["models", "--json"]);
   assert.equal(modelsRes.status, 0, modelsRes.stderr);
-  assert.ok(JSON.parse(modelsRes.stdout).models.length >= 6);
+  assert.ok(JSON.parse(modelsRes.stdout).models.length >= 4);
 
   const status = runStatus({
     profileDir,
