@@ -99,15 +99,16 @@ test("unified daemon serves single responsive UI, enforces auth, runs full chat 
     }).then(r => r.json());
     assert.equal(created.ok, true);
 
-    // Wait briefly for async pipeline tick to finish.
+    // Windows Git worktree creation and merge can exceed a few seconds under load.
     let detail;
-    for (let i = 0; i < 40; i++) {
+    const deadline = Date.now() + 30000;
+    do {
       detail = await fetch(`${started.url}/api/v2/tasks/${created.task.id}`, {
         headers: { authorization: `Bearer ${started.phoneToken}` },
       }).then(r => r.json());
       if (detail.task.status === "done") break;
       await new Promise(r => setTimeout(r, 150));
-    }
+    } while (Date.now() < deadline);
     assert.equal(detail.task.status, "done");
     assert.equal(detail.artifacts.delivery.merged, true);
     assert.ok(Array.isArray(detail.steps) && detail.steps.length >= 4, "live steps timeline should be recorded");
