@@ -143,6 +143,9 @@ test("SSH wake watcher drains .wake files atomically and transport auth enforces
     assert.equal(authenticateRequest({ headers: { host: "127.0.0.1:4318", origin: "https://evil.example" }, socket: { remoteAddress: "127.0.0.1" } }).ok, false);
     assert.equal(authenticateRequest({ headers: { host: "my-laptop.ts.net:4318" }, socket: { remoteAddress: "10.0.0.5" } }, { phoneTokenHash: phoneHash }).ok, false);
     assert.equal(authenticateRequest({ headers: { host: "my-laptop.ts.net:4318", authorization: `Bearer ${phoneToken}` }, socket: { remoteAddress: "10.0.0.5" } }, { phoneTokenHash: phoneHash }).caller, "phone");
+    const { resolveListenConfig } = require("../../lib/v2/transport.cjs");
+    assert.equal(resolveListenConfig({ transport: {} }).host, "127.0.0.1");
+    assert.equal(resolveListenConfig({ transport: { tailscaleHost: "100.64.0.10" } }).host, "0.0.0.0"); // leak-guard-ignore
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
