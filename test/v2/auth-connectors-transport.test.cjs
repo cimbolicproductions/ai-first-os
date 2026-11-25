@@ -5,6 +5,8 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
+const { EventEmitter } = require("node:events");
+const { PassThrough, Writable } = require("node:stream");
 const { createStore } = require("../../lib/v2/store.cjs");
 const { saveProfile, loadProfile } = require("../../lib/v2/profile.cjs");
 const { createPipeline } = require("../../lib/v2/pipeline.cjs");
@@ -49,6 +51,81 @@ test("auth broker stores secrets in cached keyring, resolves auth card, and auto
   assert.equal(resumed[0].taskId, task.id);
   assert.equal(store.listOpenApprovals({ kind: "auth" }).length, 0);
   store.close();
+});
+
+test("Claude phone sign-in replaces a stale card and sends the one-time code only to the active CLI", async () => {
+  const store = createStore({ dbPath: ":memory:" });
+  const resumeEvents = [];
+  const cliInput = [];
+  const link = new URL("https://claude.com/cai/oauth/authorize");
+  link.searchParams.set("redirect_uri", "https://platform.claude.com/oauth/code/callback");
+  link.searchParams.set("state", "fixture-state");
+  link.searchParams.set("code_challenge", "fixture-challenge");
+  const code = "fixture-authorization-code#fixture-state";
+  const child = new EventEmitter();
+  child.stdout = new PassThrough();
+  child.stderr = new PassThrough();
+  child.stdin = new Writable({
+    write(chunk, encoding, callback) {
+      cliInput.push(chunk.toString());
+      callback();
+    },
+  });
+  let closed = false;
+  function closeChild(status) {
+    if (closed) return;
+    closed = true;
+    child.emit("close", status);
+  }
+  child.kill = () => closeChild(1);
+
+  const broker = createAuthBroker({
+    store,
+    locate: () => "claude.exe",
+    spawnFn: () => {
+      setImmediate(() => {
+        // Claude Code prints an OSC 8 hyperlink around the URL in its terminal instructions.
+        child.stdout.write(`If the browser didn't open, visit: \x1b]8;;${link}\x1b\\${link}\x1b]8;;\x1b\\\nPaste code here if prompted > `);
+      });
+      return child;
+    },
+    onAuthResolved: info => resumeEvents.push(info),
+    linkTimeoutMs: 100,
+  });
+  try {
+    const stale = store.createApproval({
+      kind: "auth",
+      title: "Sign in to Claude Code",
+      prompt: "Open the sign-in link.",
+      service: "claude",
+    });
+    const task = store.createTask({ text: "Check a project", stage: "waiting_auth", status: "waiting" });
+    const card = await broker.requestAuth({ taskId: task.id, service: "claude" });
+    assert.notEqual(card.id, stale.id);
+    assert.equal(card.link, link.href);
+    assert.equal(card.meta.acceptsCode, true);
+    assert.deepEqual(store.listOpenApprovals({ kind: "auth" }).map(approval => approval.id), [card.id]);
+
+    await assert.rejects(async () => broker.submitCode({ approvalId: stale.id, code }));
+    await assert.rejects(async () => broker.submitCode({ approvalId: card.id, code: "missing-state" }));
+    await assert.rejects(async () => broker.submitCode({ approvalId: card.id, code: code + "\nsecond-line" }));
+    await assert.rejects(async () => broker.submitCode({ approvalId: card.id, code: "x".repeat(4097) + "#state" }));
+    assert.deepEqual(cliInput, []);
+
+    const completion = broker.submitCode({ approvalId: card.id, code });
+    await new Promise(resolve => setImmediate(resolve));
+    assert.deepEqual(cliInput, [code + "\n"]);
+    assert.deepEqual(resumeEvents, []);
+    closeChild(0);
+    assert.equal((await completion).ok, true);
+    assert.deepEqual(resumeEvents.map(event => event.taskId), [task.id]);
+    assert.equal(store.listOpenApprovals({ kind: "auth" }).length, 0);
+    assert.ok(!JSON.stringify(store.getApproval(card.id)).includes(code));
+    assert.ok(!JSON.stringify(store.getThread(task.id)).includes(code));
+  } finally {
+    closeChild(1);
+    store.close();
+  }
 });
 
 test("bidirectional Muse/GrokBot intake supports reply relay, locked briefs, OpenAPI spec, and blocks forged text approvals", () => {

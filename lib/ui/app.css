@@ -494,6 +494,10 @@ body {
 .card.delivery { border-color: rgba(34, 197, 94, 0.5); background: linear-gradient(180deg, rgba(34, 197, 94, 0.06), var(--surface)); }
 .card h3 { font-size: 16px; font-weight: 600; }
 .card-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.auth-code-form, .auth-code-form label { display: grid; gap: 8px; }
+.auth-code-form input { width: 100%; background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 8px; font: inherit; }
+.auth-code-form button { justify-self: start; }
+.auth-code-form [role="status"]:empty, #systemAuthStatus:empty, #systemAuthZone:empty { display: none; }
 
 .device-code {
   font-family: var(--mono);
