@@ -43,9 +43,10 @@ test("unified daemon serves single responsive UI, enforces auth, runs full chat 
     id: s.id, label: s.label, installed: true, headless: true, outdated: false, signedIn: true, free: s.free === true,
   }));
 
-  const fakeRunner = async ({ provider, prompt, cwd, resultFile }) => {
+  const fakeRunner = async ({ provider, prompt, cwd, resultFile, onActivity }) => {
     let payload;
     if (prompt.includes("AI-first OS Intake")) {
+      onActivity?.("Reading project list");
       payload = {
         status: "brief_ready",
         title: "Upgrade demo-site greeting",
@@ -54,9 +55,11 @@ test("unified daemon serves single responsive UI, enforces auth, runs full chat 
         summary: "Update main.js greeting to v2",
       };
     } else if (prompt.includes("AI-first OS Builder")) {
+      onActivity?.("Editing main.js");
       fs.writeFileSync(path.join(cwd, "main.js"), "console.log('v2');\n", "utf8");
       payload = { status: "completed", summary: "Updated greeting to v2." };
     } else if (prompt.includes("AI-first OS Independent Auditor")) {
+      onActivity?.("Checking git diff");
       payload = { status: "clean", summary: "Clean single-line change verified." };
     }
     fs.writeFileSync(resultFile, JSON.stringify(payload), "utf8");
@@ -107,6 +110,10 @@ test("unified daemon serves single responsive UI, enforces auth, runs full chat 
     }
     assert.equal(detail.task.status, "done");
     assert.equal(detail.artifacts.delivery.merged, true);
+    assert.ok(Array.isArray(detail.steps) && detail.steps.length >= 4, "live steps timeline should be recorded");
+    const buildStep = detail.steps.find(s => s.stage === "building");
+    assert.equal(buildStep?.status, "done");
+    assert.ok(buildStep?.activities.includes("Editing main.js"));
     assert.equal(fs.readFileSync(path.join(repo, "main.js"), "utf8").replace(/\r\n/g, "\n"), "console.log('v2');\n");
 
     // 4. Enable Muse connector -> Muse gets its own bearer token -> scoped ONLY to intake routes!

@@ -103,7 +103,7 @@ test("2D stakes x stage router enforces flagship floor & distinct audit on criti
     assert.equal(critAudit.tier, "workhorse");
 
     // Exhaust ALL workhorse providers on critical build -> returns QUOTA_WAIT (never silently drops to opencode free!).
-    for (const p of ["claude", "codex", "antigravity", "gemini"]) {
+    for (const p of ["claude", "codex", "antigravity"]) {
       recordProviderFailure(store, { kind: "exhausted", provider: p, resetAt: clock + 3600_000, reason: "limit" });
     }
     const blockedCrit = selectAssignment({ store, profile: {}, detected, stakes: "critical", stage: "building", now: clock });
@@ -132,9 +132,11 @@ test("2D stakes x stage router enforces flagship floor & distinct audit on criti
   }
 });
 
-test("harnesses include restored Gemini CLI and extract structured output from file, marker, or fenced JSON despite trailing prose", () => {
-  assert.ok(getHarness("gemini"), "Gemini CLI must be a first-class harness");
-  assert.equal(HARNESS_SPECS.length, 6);
+test("harnesses expose clean 4-CLI lineup (Claude, Codex, Antigravity/Gemini, OpenCode) and extract structured output cleanly", () => {
+  assert.ok(getHarness("antigravity"), "Antigravity covers Gemini models");
+  assert.equal(getHarness("gemini"), null, "Redundant standalone Gemini CLI removed");
+  assert.equal(getHarness("cursor"), null, "Cursor CLI removed");
+  assert.equal(HARNESS_SPECS.length, 4);
 
   // Trailing commentary after AIOS-RESULT no longer breaks parsing!
   const markerOut = extractStructuredOutput({

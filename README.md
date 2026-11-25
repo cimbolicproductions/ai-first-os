@@ -20,7 +20,7 @@ node bin/aios.cjs daemon
 
 - **Single Source of Truth (`~/.aios/os.db`)**: Local SQLite WAL database tracks tasks, chat threads, terminal agent bus exchanges, persisted provider quota reset clocks, discovered models, and digest-bound approvals.
 - **External Private Profile (`~/.aios/profile.json`)**: Your project roots, repo stakes (`critical`, `standard`, `sandbox`), Obsidian vault path, Tailscale address, and connector toggles live outside any repository.
-- **Unified Terminal Agent Runtime**: Orchestrates all 6 CLI harnesses (`claude`, `codex`, `antigravity`, `gemini`, `opencode`, `cursor`) over isolated git worktrees (`aios/<taskId>`) with per-project concurrency locks and real git diffs.
+- **Unified Terminal Agent Runtime**: Orchestrates your 4 terminal CLI harnesses (`claude`, `codex`, `antigravity`, `opencode`) over isolated git worktrees (`aios/<taskId>`) with per-project concurrency locks, live step streaming, and real git diffs.
 - **Stakes-Aware Auto-Routing & Failover**:
   - `critical`: Flagship workhorse planner -> workhorse builder -> mandatory **distinct** cross-model auditor -> 1-tap merge approval.
   - `standard`: Workhorse planner -> balanced builder executing `plan.md` -> distinct workhorse auditor (escalates if fixes stall).

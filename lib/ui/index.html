@@ -51,9 +51,25 @@
           <span id="taskStakesBadge" class="pill" hidden></span>
         </div>
         <h2 id="taskTitle"></h2>
-        <div id="pipelineBar" class="pipeline-bar"></div>
-        <p id="liveStatus" class="live-status" hidden></p>
       </div>
+
+      <section id="progressCard" class="progress-card" hidden aria-live="polite">
+        <button type="button" id="progressToggle" class="progress-head" aria-expanded="true">
+          <span id="progressIcon" class="progress-icon"></span>
+          <span class="progress-title-wrap">
+            <span id="progressHeadline" class="progress-headline"></span>
+            <span id="progressSub" class="progress-sub" hidden></span>
+          </span>
+          <span class="progress-right">
+            <span id="progressAgent" class="progress-agent" hidden></span>
+            <span id="progressTimer" class="progress-timer" hidden></span>
+            <span id="progressChevron" class="progress-chevron" aria-hidden="true">▾</span>
+          </span>
+        </button>
+        <div id="progressBody" class="progress-body">
+          <ol id="progressSteps" class="step-timeline"></ol>
+        </div>
+      </section>
 
       <div id="approvalZone" class="card-stack"></div>
       <div id="deliveryZone" class="card-stack"></div>

@@ -17,8 +17,8 @@ This repository is **AI-first OS** (`https://github.com/cimbolicproductions/ai-f
 - `lib/v2/quota.cjs`: Persisted multi-provider quota & auth-expiry classification (handles timezone-aware clock resets, ISO-8601, relative windows).
 - `lib/v2/model-catalog.cjs`: Live model discovery, tier classification (`apex > workhorse > balanced > fast-free`), canary probes, 1-tap promotion cards, cross-provider effort mapping.
 - `lib/v2/router.cjs`: Stakes-by-stage auto-router with unlimited provider failover, intelligence floors (no weak/free drop or self-audit on `critical`), and escalation on stalled fix rounds.
-- `lib/v2/harnesses.cjs`: Unified 6-CLI runner (`claude`, `codex`, `antigravity`, `gemini`, `opencode`, `cursor`) with non-interactive flags, effort flags, and structured output extraction.
-- `lib/v2/agent-bus.cjs`: Per-task run directories (`~/.aios/runs/<taskId>/`), secret-checked cross-repo read-only reference staging, and Obsidian vault delivery sync.
+- `lib/v2/harnesses.cjs`: Unified 4-CLI runner (`claude`, `codex`, `antigravity`, `opencode`) with non-interactive flags, effort flags, and structured output extraction.
+- `lib/v2/agent-bus.cjs`: Per-task run directories (`~/.aios/runs/<taskId>/`), live step timelines (`steps.json`), secret-checked cross-repo read-only reference staging, and Obsidian vault delivery sync.
 - `lib/v2/pipeline.cjs`: Adaptive 3-stage pipeline (`intake -> planning -> building <-> planner bus -> auditing <-> fix loop -> commit/merge -> Total Output`), continuation matching, and concurrent `tickQueue`.
 - `lib/v2/auth-broker.cjs`: Unified 1-link sign-in/OAuth/device-code broker with cached OS keyring storage and automatic task resume.
 - `lib/v2/connectors.cjs`: Bidirectional Muse/GrokBot Intake v2, OpenAPI 3.1 spec generator, GrokBot detection, and optional thin Google Sheet sync plugin.
