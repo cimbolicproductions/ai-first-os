@@ -5,7 +5,7 @@ const test = require("node:test");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
-const { boardQuestionIntent, readBoardStatus } = require("../../lib/v2/board-status.cjs");
+const { boardQuestionIntent, boardTaskLookupId, readBoardStatus, readBoardTask } = require("../../lib/v2/board-status.cjs");
 const { createStore } = require("../../lib/v2/store.cjs");
 const { createPipeline } = require("../../lib/v2/pipeline.cjs");
 
@@ -29,11 +29,21 @@ test("recognizes board status and the owner's Agent Tasks clarification without 
   assert.equal(boardQuestionIntent([{ role: "intake", content: "What's next on the board?" }]), null);
 });
 
-function boardFixture() {
+test("identifies a single task question without treating action requests as lookups", () => {
+  for (const text of ["What is P188?", "And p188?", "What’s the status of P188?", "Could you look up P188?"]) {
+    assert.equal(boardTaskLookupId(text), "P188");
+  }
+  for (const text of ["Continue P188", "Mark P188 done", "What is P188 and can you close it?", "What are P188 and P189?"]) {
+    assert.equal(boardTaskLookupId(text), null);
+  }
+});
+
+function boardFixture({ archived = false } = {}) {
   const calls = [];
   const values = {
     "A1:G1": [["ID", "To", "Task", "Status", "Latest note", "Order", "From"]],
     "A2:A7": [["P10"], [], ["P11"], ["P12"], ["P13"], ["P14"]],
+    "A7:D7": [["P14", "Juno", "Needs approval", "Waiting on Dom"]],
     "B2:B7": [["Codex"], [], ["Codex"], ["Claude"], ["Codex"], ["Juno"]],
     "C2:C7": [["Lower priority"], [], ["Next Codex task"], ["Claude is underway"], ["Finished task"], ["Needs approval"]],
     "D2:D7": [["Open"], [], ["Open"], ["In progress"], ["Done"], ["Waiting on Dom"]],
@@ -44,9 +54,21 @@ function boardFixture() {
     async callGoogleDrive(tool, args) {
       calls.push([tool, args]);
       if (tool === "get_spreadsheet_metadata") {
-        return { sheets: [{ properties: { title: "Tasks", gridProperties: { rowCount: 7, columnCount: 7 } } }] };
+        const tabs = [{ title: "Tasks", gridProperties: { rowCount: 7, columnCount: 7 } }];
+        if (archived) tabs.push({ title: "Done", gridProperties: { rowCount: 6, columnCount: 4 } });
+        return { sheets: tabs.map(properties => ({ properties })) };
       }
       assert.equal(tool, "get_spreadsheet_range");
+      if (args.sheet_name === "Done") {
+        const done = {
+          "A1:D1": [["Status", "Task", "ID", "To"]],
+          "C2:C6": [["P1880"], [], ["p188"], ["P14"], []],
+          "A4:D4": [["Done", "Archived connector task", "p188", "Claude"]],
+          "A5:D5": [["Done", "Different archived item", "P14", "Claude"]],
+        };
+        assert.ok(archived && Object.hasOwn(done, args.range));
+        return { majorDimension: "ROWS", range: args.range, values: done[args.range] };
+      }
       assert.equal(args.sheet_name, "Tasks");
       assert.ok(Object.hasOwn(values, args.range));
       return { majorDimension: "ROWS", range: args.range, values: values[args.range] };
@@ -63,6 +85,16 @@ test("reads bounded Agent Tasks columns by header and reports the lowest order f
   assert.match(answer, /P11 · Codex · Next Codex task \(Open, order 2\)/);
   assert.match(answer, /P12 · Claude · Claude is underway \(In progress, order 4\)/);
   assert.doesNotMatch(answer, /Lower priority|Finished task|Needs approval/);
+});
+
+test("checks active and archived IDs exactly and reports missing or duplicate IDs", async () => {
+  const { callGoogleDrive, calls } = boardFixture({ archived: true });
+  const lookup = taskId => readBoardTask({ boardId: "board-fixture", callGoogleDrive, taskId });
+  const answer = await lookup("P188");
+  assert.match(answer, /^P188 is assigned to Claude.*Done.*\nArchived connector task/);
+  assert.ok(calls.some(([, args]) => args.sheet_name === "Done" && args.range === "A4:D4"));
+  assert.match(await lookup("P19"), /couldn’t find P19.*Tasks and Done/);
+  assert.match(await lookup("P14"), /2 entries for P14[\s\S]*Needs approval[\s\S]*Different archived item/);
 });
 
 test("answers a waiting-on-me follow-up in a completed board thread, without launching an agent", async () => {
@@ -92,6 +124,17 @@ test("answers a waiting-on-me follow-up in a completed board thread, without lau
     assert.equal(fs.existsSync(path.join(tmp, "worktrees")), false);
     assert.equal(calls.length, 14);
     assert.equal(store.getThread(task.id).at(-1).content, result.answer);
+
+    assert.equal(pipeline.replyToTask(task.id, { reply: "What is P14?", source: "phone" }).id, task.id);
+    const lookup = await pipeline.processTask(task.id);
+    assert.equal(lookup.status, "done");
+    assert.match(lookup.answer, /^P14 is assigned to Juno.*Waiting on Dom.*\nNeeds approval/);
+    assert.doesNotMatch(lookup.answer, /1 task waiting on you|P11|P12|P13/);
+    const message = store.getThread(task.id).at(-1);
+    assert.equal(message.role, "assistant");
+    assert.equal(message.kind, "message");
+    assert.equal(message.meta.boardIntent, "task_lookup");
+    assert.equal(message.content, lookup.answer);
   } finally {
     store.close();
     fs.rmSync(tmp, { recursive: true, force: true });
@@ -114,6 +157,14 @@ test("intake understands a board question before the backend reads it and keeps 
         if (prompts.length === 1) {
           assert.equal(calls.length, 0, "intake should understand the request before the board is read");
           return { ok: true, structured: { status: "board_read", intent: "overview" } };
+        }
+        if (prompts.length === 3) {
+          assert.match(prompt, /refresh my memory about the work in P14/i);
+          return { ok: true, structured: { status: "board_read", intent: "task_lookup", taskId: "P14" } };
+        }
+        if (prompts.length === 4) {
+          assert.doesNotMatch(prompt, /Needs approval/);
+          return { ok: true, structured: { status: "board_read", intent: "task_lookup", taskId: "P14" } };
         }
         assert.match(prompt, /which ones need a decision from me\?/i);
         assert.match(prompt, /Agent Tasks/);
@@ -140,6 +191,14 @@ test("intake understands a board question before the backend reads it and keeps 
     assert.equal(prompts.length, 2);
     assert.equal(calls.length, 14);
     assert.equal(fs.existsSync(path.join(tmp, "worktrees")), false);
+
+    pipeline.replyToTask(task.id, { reply: "Could you refresh my memory about the work in P14?" });
+    assert.match((await pipeline.processTask(task.id)).answer, /^P14 is assigned to Juno.*\nNeeds approval/);
+    assert.equal(calls.length, 18);
+
+    pipeline.replyToTask(task.id, { reply: "Could you refresh my memory about the work in P15?" });
+    assert.match((await pipeline.processTask(task.id)).answer, /Which Agent Tasks number/);
+    assert.equal(calls.length, 18);
   } finally {
     store.close();
     fs.rmSync(tmp, { recursive: true, force: true });
