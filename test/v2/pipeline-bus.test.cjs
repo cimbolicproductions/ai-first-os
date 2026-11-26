@@ -175,12 +175,16 @@ test("conversational intake answers casual follow-ups in context and clarifies a
   const store = createStore({ dbPath: ":memory:" });
   try {
     const prompts = [];
+    const workers = [];
     const pipeline = createPipeline({
       store, profileDir: tmp, runsDir: path.join(tmp, "runs"), worktreesDir: path.join(tmp, "worktrees"),
-      getProfile: () => ({ models: { disabledProviders: ["opencode"] } }),
+      getProfile: () => ({
+        models: { disabledProviders: ["opencode", "antigravity", prompts.length ? "claude" : "codex"] },
+      }),
       detect: allSignedIn,
-      runner: async ({ mode, prompt }) => {
+      runner: async ({ provider, model, effort, mode, prompt }) => {
         assert.equal(mode, "read");
+        workers.push({ provider, model, effort });
         prompts.push(prompt);
         if (prompts.length === 1) {
           assert.match(prompt, /thinking about a neighborhood book club/i);
@@ -203,17 +207,27 @@ test("conversational intake answers casual follow-ups in context and clarifies a
     const firstAnswer = store.getThread(task.id).at(-1);
     assert.equal(firstAnswer.role, "assistant");
     assert.equal(firstAnswer.kind, "message");
+    assert.equal(firstAnswer.agent, workers[0].provider);
+    assert.deepEqual(firstAnswer.meta, { modelId: workers[0].model, effort: workers[0].effort });
     assert.equal(store.getTask(task.id).delivery, null);
 
     const reopened = pipeline.replyToTask(task.id, { reply: "What would make that less intimidating?", source: "phone" });
     assert.equal(reopened.id, task.id, "casual follow-ups should remain in the same thread");
     assert.equal(reopened.stage, "intake");
     assert.equal((await pipeline.processTask(task.id)).status, "done");
-    assert.equal(store.getThread(task.id).at(-1).content, "Make the first meeting optional and low pressure.");
+    const secondAnswer = store.getThread(task.id).at(-1);
+    assert.equal(secondAnswer.content, "Make the first meeting optional and low pressure.");
+    assert.notEqual(firstAnswer.agent, secondAnswer.agent);
+    assert.deepEqual(secondAnswer.meta, { modelId: workers[1].model, effort: workers[1].effort });
+    assert.deepEqual(store.getThread(task.id)[1], firstAnswer, "the original reply retains its own worker metadata");
 
     pipeline.replyToTask(task.id, { reply: "Could you build it?", source: "phone" });
     assert.equal((await pipeline.processTask(task.id)).status, "waiting_user");
-    assert.equal(store.getThread(task.id).at(-1).content, "What would you like built for the book club?");
+    const thread = store.getThread(task.id);
+    assert.equal(thread.at(-1).content, "What would you like built for the book club?");
+    assert.equal(thread.at(-1).agent, workers[2].provider);
+    assert.deepEqual(thread.at(-1).meta, { modelId: workers[2].model, effort: workers[2].effort });
+    assert.ok(thread.filter(message => message.role === "owner").every(message => message.agent === null && !message.meta.modelId));
     assert.equal(store.getTask(task.id).brief, null);
     assert.equal(prompts.length, 3);
     assert.equal(fs.existsSync(path.join(tmp, "worktrees")), false);

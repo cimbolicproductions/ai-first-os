@@ -46,20 +46,14 @@
 
     <section id="focusView" class="focus-view" hidden>
       <div class="task-header">
-        <div class="task-meta-row">
-          <span id="taskIdBadge" class="pill"></span>
-          <span id="taskProjectBadge" class="pill muted-pill" hidden></span>
-          <span id="taskStakesBadge" class="pill" hidden></span>
-        </div>
         <h2 id="taskTitle"></h2>
       </div>
 
-      <section id="progressCard" class="progress-card" hidden aria-live="polite">
-        <button type="button" id="progressToggle" class="progress-head" aria-expanded="true">
-          <span id="progressIcon" class="progress-icon"></span>
+      <section id="progressCard" class="progress-card" hidden>
+        <button type="button" id="progressToggle" class="progress-head" aria-expanded="false" aria-controls="progressBody">
+          <span id="progressIcon" class="progress-icon" aria-hidden="true"></span>
           <span class="progress-title-wrap">
             <span id="progressHeadline" class="progress-headline"></span>
-            <span id="progressSub" class="progress-sub" hidden></span>
           </span>
           <span class="progress-right">
             <span id="progressAgent" class="progress-agent" hidden></span>
@@ -68,21 +62,27 @@
           </span>
         </button>
         <div id="progressBody" class="progress-body">
+          <p id="progressExplanation" class="activity-body" hidden></p>
+          <div class="task-meta-row">
+            <span id="taskIdBadge" class="pill"></span>
+            <span id="taskProjectBadge" class="pill muted-pill" hidden></span>
+            <span id="taskStakesBadge" class="pill" hidden></span>
+          </div>
           <ol id="progressSteps" class="step-timeline"></ol>
         </div>
       </section>
 
       <div id="approvalZone" class="card-stack"></div>
+      <div id="conversation" class="conversation" aria-label="Conversation"></div>
       <div id="deliveryZone" class="card-stack"></div>
-      <div id="conversation" class="conversation"></div>
 
       <details id="busDrawer" class="bus-drawer" hidden>
-        <summary>Terminal agent dialogue (<span id="busCount">0</span>)</summary>
+        <summary>Agent activity (<span id="busCount">0</span>)</summary>
         <div id="busList" class="bus-list"></div>
       </details>
 
       <details id="diffDrawer" class="bus-drawer" hidden>
-        <summary>Plan &amp; ground-truth diff</summary>
+        <summary>Plan and file changes</summary>
         <pre id="planPre" class="code-box" hidden></pre>
         <pre id="diffPre" class="code-box" hidden></pre>
       </details>
