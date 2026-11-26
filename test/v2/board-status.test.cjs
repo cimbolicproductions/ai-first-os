@@ -73,7 +73,7 @@ test("answers a waiting-on-me follow-up in a completed board thread, without lau
     const pipeline = createPipeline({
       store, profileDir: tmp, runsDir: path.join(tmp, "runs"), worktreesDir: path.join(tmp, "worktrees"),
       getProfile: () => ({ connectors: { sheetsSync: { boardId: "board-fixture", enabled: false } } }),
-      detect: () => assert.fail("Board follow-up shouldn't load agent status"),
+      detect: () => [],
       runner: () => assert.fail("Board follow-up shouldn't launch a worker"),
       callGoogleDrive,
     });
@@ -81,7 +81,7 @@ test("answers a waiting-on-me follow-up in a completed board thread, without lau
     store.addThreadMessage({ taskId: task.id, role: "owner", content: "i agent tasks is what i was asking about" });
     assert.equal((await pipeline.processTask(task.id)).status, "done");
 
-    const reopened = pipeline.continueTask(task.id, { reply: "which are waiting on me?" });
+    const reopened = pipeline.replyToTask(task.id, { reply: "which are waiting on me?", source: "phone" });
     assert.equal(reopened.stage, "intake");
     const result = await pipeline.processTask(task.id);
     assert.equal(result.status, "done");
@@ -92,6 +92,54 @@ test("answers a waiting-on-me follow-up in a completed board thread, without lau
     assert.equal(fs.existsSync(path.join(tmp, "worktrees")), false);
     assert.equal(calls.length, 14);
     assert.equal(store.getThread(task.id).at(-1).content, result.answer);
+  } finally {
+    store.close();
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("intake understands a board question before the backend reads it and keeps board data out of later prompts", async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "aios-board-intent-"));
+  const store = createStore({ dbPath: ":memory:" });
+  try {
+    const { calls, callGoogleDrive } = boardFixture();
+    const prompts = [];
+    const pipeline = createPipeline({
+      store, profileDir: tmp, runsDir: path.join(tmp, "runs"), worktreesDir: path.join(tmp, "worktrees"),
+      getProfile: () => ({ connectors: { sheetsSync: { boardId: "board-fixture", enabled: false } } }),
+      detect: () => [{ id: "claude", label: "Claude Code", installed: true, signedIn: true, headless: true }],
+      runner: async ({ prompt, mode }) => {
+        assert.equal(mode, "read");
+        prompts.push(prompt);
+        if (prompts.length === 1) {
+          assert.equal(calls.length, 0, "intake should understand the request before the board is read");
+          return { ok: true, structured: { status: "board_read", intent: "overview" } };
+        }
+        assert.match(prompt, /which ones need a decision from me\?/i);
+        assert.match(prompt, /Agent Tasks/);
+        assert.doesNotMatch(prompt, /Next Codex task|Claude is underway/);
+        assert.equal(calls.length, 7);
+        return { ok: true, structured: { status: "board_read", intent: "waiting_on_owner" } };
+      },
+      callGoogleDrive,
+    });
+    const task = store.createTask({ text: "What's next on the board?" });
+    assert.equal((await pipeline.processTask(task.id)).status, "done");
+    const overview = store.getThread(task.id).at(-1);
+    assert.equal(overview.role, "assistant");
+    assert.equal(overview.kind, "message");
+    assert.equal(overview.meta.boardIntent, "overview");
+    assert.match(overview.content, /P11 · Codex · Next Codex task/);
+
+    const reopened = pipeline.replyToTask(task.id, { reply: "Which ones need a decision from me?", source: "phone" });
+    assert.equal(reopened.id, task.id);
+    assert.equal((await pipeline.processTask(task.id)).status, "done");
+    const waiting = store.getThread(task.id).at(-1);
+    assert.equal(waiting.meta.boardIntent, "waiting_on_owner");
+    assert.match(waiting.content, /P14 · Juno · Needs approval/);
+    assert.equal(prompts.length, 2);
+    assert.equal(calls.length, 14);
+    assert.equal(fs.existsSync(path.join(tmp, "worktrees")), false);
   } finally {
     store.close();
     fs.rmSync(tmp, { recursive: true, force: true });

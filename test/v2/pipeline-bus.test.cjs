@@ -58,7 +58,12 @@ test("full 3-stage critical pipeline: brief -> workhorse plan -> builder clarifi
       calls.push({ provider, mode, model, effort });
       let payload;
 
-      if (prompt.includes("Builder Clarification Request")) {
+      if (prompt.includes("AI-first OS Intake")) {
+        assert.equal(mode, "read");
+        assert.match(prompt, /what did we change\?/i);
+        assert.match(prompt, /Update index\.js to return 42/);
+        payload = { status: "answer", answer: "The build changes index.js to return 42." };
+      } else if (prompt.includes("Builder Clarification Request")) {
         payload = { status: "plan_answer", answer: "Return 42 for valid input.", planAddendum: "Export value 42." };
       } else if (prompt.includes("AI-first OS Architect / Planner")) {
         planners.push(provider);
@@ -143,6 +148,16 @@ test("full 3-stage critical pipeline: brief -> workhorse plan -> builder clarifi
     // 1-tap Ship approval merges cleanly into main!
     const shipApproval = store.listOpenApprovals({ taskId: task.id, kind: "ship" })[0];
     assert.ok(shipApproval);
+    const pendingBuild = store.getTask(task.id);
+    const discussion = pipeline.replyToTask(task.id, { reply: "What did we change?", source: "phone" });
+    assert.notEqual(discussion.id, task.id);
+    assert.equal(discussion.stage, "intake");
+    assert.equal((await pipeline.processTask(discussion.id)).status, "done");
+    assert.equal(store.getThread(discussion.id).at(-1).content, "The build changes index.js to return 42.");
+    assert.deepEqual(store.getTask(task.id), pendingBuild);
+    assert.deepEqual(store.listOpenApprovals({ taskId: task.id, kind: "ship" }), [shipApproval]);
+    assert.equal(fs.readFileSync(path.join(repo, "index.js"), "utf8").replace(/\r\n/g, "\n"), "module.exports = () => 1;\n");
+
     store.answerApproval({ id: shipApproval.id, value: "merge", digest: shipApproval.digest, source: "phone" });
     const shipped = await pipeline.executeShipApproval(shipApproval, "merge");
     assert.equal(shipped.ok, true);
@@ -151,6 +166,59 @@ test("full 3-stage critical pipeline: brief -> workhorse plan -> builder clarifi
 
     store.close();
   } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("conversational intake answers casual follow-ups in context and clarifies ambiguous work", async () => {
+  const tmp = mkTmp("aios-v2-conversation-");
+  const store = createStore({ dbPath: ":memory:" });
+  try {
+    const prompts = [];
+    const pipeline = createPipeline({
+      store, profileDir: tmp, runsDir: path.join(tmp, "runs"), worktreesDir: path.join(tmp, "worktrees"),
+      getProfile: () => ({ models: { disabledProviders: ["opencode"] } }),
+      detect: allSignedIn,
+      runner: async ({ mode, prompt }) => {
+        assert.equal(mode, "read");
+        prompts.push(prompt);
+        if (prompts.length === 1) {
+          assert.match(prompt, /thinking about a neighborhood book club/i);
+          return { ok: true, structured: { status: "answer", answer: "Start with a short story and a few neighbors." } };
+        }
+        if (prompts.length === 2) {
+          assert.match(prompt, /what would make that less intimidating\?/i);
+          assert.match(prompt, /Start with a short story and a few neighbors/);
+          return { ok: true, structured: { status: "answer", answer: "Make the first meeting optional and low pressure." } };
+        }
+        assert.match(prompt, /could you build it\?/i);
+        return {
+          ok: true,
+          structured: { status: "clarify", questions: ["What would you like built for the book club?"] },
+        };
+      },
+    });
+    const task = store.createTask({ text: "Hey, I’m thinking about a neighborhood book club.", source: "phone" });
+    assert.equal((await pipeline.processTask(task.id)).status, "done");
+    const firstAnswer = store.getThread(task.id).at(-1);
+    assert.equal(firstAnswer.role, "assistant");
+    assert.equal(firstAnswer.kind, "message");
+    assert.equal(store.getTask(task.id).delivery, null);
+
+    const reopened = pipeline.replyToTask(task.id, { reply: "What would make that less intimidating?", source: "phone" });
+    assert.equal(reopened.id, task.id, "casual follow-ups should remain in the same thread");
+    assert.equal(reopened.stage, "intake");
+    assert.equal((await pipeline.processTask(task.id)).status, "done");
+    assert.equal(store.getThread(task.id).at(-1).content, "Make the first meeting optional and low pressure.");
+
+    pipeline.replyToTask(task.id, { reply: "Could you build it?", source: "phone" });
+    assert.equal((await pipeline.processTask(task.id)).status, "waiting_user");
+    assert.equal(store.getThread(task.id).at(-1).content, "What would you like built for the book club?");
+    assert.equal(store.getTask(task.id).brief, null);
+    assert.equal(prompts.length, 3);
+    assert.equal(fs.existsSync(path.join(tmp, "worktrees")), false);
+  } finally {
+    store.close();
     fs.rmSync(tmp, { recursive: true, force: true });
   }
 });

@@ -16,6 +16,7 @@ const {
   normalizeProfile,
 } = require("../lib/v2/profile.cjs");
 const { createStore } = require("../lib/v2/store.cjs");
+const { createPipeline } = require("../lib/v2/pipeline.cjs");
 const { detectHarnesses, listLiveModels } = require("../lib/v2/harnesses.cjs");
 const { refreshModelCatalog, seedBaselineModels } = require("../lib/v2/model-catalog.cjs");
 const { createDaemon } = require("../lib/v2/daemon.cjs");
@@ -212,7 +213,8 @@ function runDoctor({ profileDir = defaultProfileDir(), detect = detectHarnesses,
   };
 }
 
-async function tryDaemonPost(profile, route, body) {
+async function tryDaemonPost(profile, route, body, { returnErrors = false } = {}) {
+  if (underTest()) return null;
   const port = profile.transport?.port || 4318;
   const url = `http://127.0.0.1:${port}${route}`;
   try {
@@ -222,9 +224,10 @@ async function tryDaemonPost(profile, route, body) {
       body: JSON.stringify(body || {}),
       signal: AbortSignal.timeout(1500),
     });
-    if (!res.ok) return null;
+    if (!res.ok && (!returnErrors || res.status === 404)) return null;
     return await res.json();
-  } catch {
+  } catch (error) {
+    if (returnErrors && error.name === "TimeoutError") throw error;
     return null;
   }
 }
@@ -378,27 +381,26 @@ async function main(argv = process.argv.slice(2)) {
     const text = positional.join(" ").trim();
     if (!text) throw new Error(`Usage: aios ${cmd} "<text>"`);
     const profile = loadProfile({ profileDir: flags.profileDir });
-    const remote = await tryDaemonPost(profile, "/api/v2/chat", {
-      text,
-      taskId: flags.taskId || (/^T\d+$/i.test(text) ? text.toUpperCase() : null),
-      project: flags.project || null,
-      source: "cli",
-    });
+    const targetId = flags.taskId?.toUpperCase() || (cmd === "wake" && /^T\d+$/i.test(text) ? text.toUpperCase() : null);
+    const action = cmd === "chat" ? "reply" : "continue";
+    const route = targetId ? `/api/v2/tasks/${encodeURIComponent(targetId)}/${action}` : "/api/v2/tasks";
+    const body = targetId
+      ? (action === "reply" ? { text } : { note: flags.taskId ? text : null })
+      : { text, projectName: flags.project || null };
+    const remote = await tryDaemonPost(profile, route, body, { returnErrors: true });
     if (remote) {
+      if (!remote.ok) throw new Error(remote.error || "The daemon rejected the message.");
       printJson(remote);
       return;
     }
     const store = createStore({ dbPath: path.join(flags.profileDir, "os.db") });
     try {
-      if (flags.taskId || (cmd === "wake" && /^T\d+$/i.test(text))) {
-        const targetId = (flags.taskId || text).toUpperCase();
-        const task = store.getTask(targetId);
-        if (!task) throw new Error(`Task ${targetId} not found.`);
-        if (cmd === "chat" || flags.taskId) {
-          store.addThreadMessage({ taskId: targetId, role: "user", agent: "cli", content: text });
-        }
-        const updated = store.updateTask(targetId, { status: "open" });
-        printJson({ ok: true, resumed: true, task: updated });
+      if (targetId) {
+        const pipeline = createPipeline({ store, getProfile: () => profile, profileDir: flags.profileDir });
+        const updated = action === "reply"
+          ? pipeline.replyToTask(targetId, { reply: text, source: "cli" })
+          : pipeline.continueTask(targetId, { reply: body.note, source: "cli" });
+        printJson({ ok: true, resumed: updated.id === targetId, task: updated });
       } else {
         const projects = listAllProjects(profile);
         const matched = resolveProject(flags.project || text, projects);
@@ -411,9 +413,6 @@ async function main(argv = process.argv.slice(2)) {
           stakes: matched ? stakesForProject(matched, profile) : "standard",
           status: "open",
         });
-        if (!store.getThread(task.id).length) {
-          store.addThreadMessage({ taskId: task.id, role: "user", agent: "cli", content: text });
-        }
         printJson({ ok: true, created: true, task });
       }
     } finally {

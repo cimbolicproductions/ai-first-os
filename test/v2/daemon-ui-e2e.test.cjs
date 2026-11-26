@@ -45,7 +45,10 @@ test("unified daemon serves single responsive UI, enforces auth, runs full chat 
 
   const fakeRunner = async ({ provider, prompt, cwd, resultFile, onActivity }) => {
     let payload;
-    if (prompt.includes("AI-first OS Intake")) {
+    if (prompt.includes("AI-first OS Intake") && prompt.includes("Can you explain the change?")) {
+      assert.match(prompt, /Update main\.js greeting to v2/);
+      payload = { status: "answer", answer: "The output now says v2." };
+    } else if (prompt.includes("AI-first OS Intake")) {
       onActivity?.("Reading project list");
       payload = {
         status: "brief_ready",
@@ -53,6 +56,7 @@ test("unified daemon serves single responsive UI, enforces auth, runs full chat 
         project: "demo-site",
         complexity: "trivial",
         summary: "Update main.js greeting to v2",
+        requirements: ["Change the greeting printed by main.js to v2."],
       };
     } else if (prompt.includes("AI-first OS Builder")) {
       onActivity?.("Editing main.js");
@@ -77,12 +81,24 @@ test("unified daemon serves single responsive UI, enforces auth, runs full chat 
 
   try {
     const started = await daemon.start({ host: "127.0.0.1", port: 0 });
+    const phoneHeaders = { "content-type": "application/json", authorization: `Bearer ${started.phoneToken}` };
+    async function readFinishedTask(id) {
+      let detail;
+      // Windows Git worktree creation and merge can exceed a few seconds under load.
+      const deadline = Date.now() + 30000;
+      do {
+        detail = await fetch(`${started.url}/api/v2/tasks/${id}`, { headers: phoneHeaders }).then(r => r.json());
+        if (["done", "failed"].includes(detail.task.status)) return detail;
+        await new Promise(resolve => setTimeout(resolve, 150));
+      } while (Date.now() < deadline);
+      return detail;
+    }
 
     // 1. Serves unified HTML + CSS + JS with security headers.
     const page = await fetch(`${started.url}/`);
     assert.equal(page.status, 200);
     assert.equal(page.headers.get("x-frame-options"), "DENY");
-    assert.match(await page.text(), /What do you want to build\?/);
+    assert.match(await page.text(), /What’s on your mind\?/);
 
     // 2. Rejects untrusted cross-origin POST.
     const badPost = await fetch(`${started.url}/api/v2/tasks`, {
@@ -95,21 +111,12 @@ test("unified daemon serves single responsive UI, enforces auth, runs full chat 
     // 3. Submit request from phone bearer token -> executes pipeline -> merges sandbox repo -> returns Total Output!
     const created = await fetch(`${started.url}/api/v2/tasks`, {
       method: "POST",
-      headers: { "content-type": "application/json", authorization: `Bearer ${started.phoneToken}` },
+      headers: phoneHeaders,
       body: JSON.stringify({ text: "Update greeting on demo-site" }),
     }).then(r => r.json());
     assert.equal(created.ok, true);
 
-    // Windows Git worktree creation and merge can exceed a few seconds under load.
-    let detail;
-    const deadline = Date.now() + 30000;
-    do {
-      detail = await fetch(`${started.url}/api/v2/tasks/${created.task.id}`, {
-        headers: { authorization: `Bearer ${started.phoneToken}` },
-      }).then(r => r.json());
-      if (detail.task.status === "done") break;
-      await new Promise(r => setTimeout(r, 150));
-    } while (Date.now() < deadline);
+    const detail = await readFinishedTask(created.task.id);
     assert.equal(detail.task.status, "done");
     assert.equal(detail.artifacts.delivery.merged, true);
     assert.ok(Array.isArray(detail.steps) && detail.steps.length >= 4, "live steps timeline should be recorded");
@@ -117,6 +124,19 @@ test("unified daemon serves single responsive UI, enforces auth, runs full chat 
     assert.equal(buildStep?.status, "done");
     assert.ok(buildStep?.activities.includes("Editing main.js"));
     assert.equal(fs.readFileSync(path.join(repo, "main.js"), "utf8").replace(/\r\n/g, "\n"), "console.log('v2');\n");
+
+    const replied = await fetch(`${started.url}/api/v2/tasks/${created.task.id}/reply`, {
+      method: "POST", headers: phoneHeaders, body: JSON.stringify({ text: "Can you explain the change?" }),
+    }).then(r => r.json());
+    assert.equal(replied.ok, true);
+    assert.notEqual(replied.task.id, created.task.id);
+    const followUp = await readFinishedTask(replied.task.id);
+    assert.equal(followUp.task.status, "done");
+    assert.equal(followUp.thread.at(-1).content, "The output now says v2.");
+    assert.equal(followUp.artifacts.delivery, null);
+    const preserved = await readFinishedTask(created.task.id);
+    assert.deepEqual(preserved.artifacts.delivery, detail.artifacts.delivery);
+    assert.equal(preserved.task.status, "done");
 
     // 5. Model selection & removal APIs update profile + catalog cleanly.
     const selectRes = await fetch(`${started.url}/api/v2/models/select`, {
@@ -136,7 +156,6 @@ test("unified daemon serves single responsive UI, enforces auth, runs full chat 
     assert.ok(daemon.getProfile().models.removedModels.includes("codex:gpt-6.3-sol"));
     assert.equal(daemon.getProfile().models.overrides.codex, "gpt-6.2-sol");
 
-    const phoneHeaders = { "content-type": "application/json", authorization: `Bearer ${started.phoneToken}` };
     const report = await fetch(`${started.url}/api/v2/models/refresh`, {
       method: "POST", headers: phoneHeaders,
     }).then(r => r.json());

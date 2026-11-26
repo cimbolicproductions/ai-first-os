@@ -128,6 +128,100 @@ test("Claude phone sign-in replaces a stale card and sends the one-time code onl
   }
 });
 
+test("GitHub connection check clears stored device codes and reuses a healthy active account", async () => {
+  const store = createStore({ dbPath: ":memory:" });
+  const task = store.createTask({ text: "Connect repository access", stage: "waiting_auth", status: "waiting" });
+  const stale = store.createApproval({ taskId: task.id, kind: "auth", title: "Old code", service: "github", code: "ABCD-1234" });
+  const spawnArgs = [];
+  const resumed = [];
+  const broker = createAuthBroker({
+    store, locate: () => "gh.exe",
+    vault: createSecretVault({ read: () => null }),
+    onAuthResolved: info => resumed.push(info),
+    spawnFn(file, args, options) {
+      const child = new EventEmitter();
+      spawnArgs.push(args);
+      assert.equal(options.stdio, "ignore");
+      setImmediate(() => child.emit("close", 0));
+      return child;
+    },
+  });
+  try {
+    assert.equal(store.getApproval(stale.id).answerValue, "expired");
+    assert.deepEqual(await broker.requestAuth({ service: "github", replaceApprovalId: stale.id }), {
+      alreadyConnected: true, service: "github",
+    });
+    assert.deepEqual(spawnArgs, [["auth", "status", "--hostname", "github.com", "--active"]]);
+    assert.equal(broker.listServiceStatuses().find(service => service.id === "github").connected, true);
+    assert.deepEqual(resumed.map(info => info.taskId), [task.id]);
+    assert.equal(store.listOpenApprovals({ kind: "auth" }).length, 0);
+  } finally {
+    broker.stop();
+    store.close();
+  }
+});
+
+test("GitHub device code can be renewed and only lasts for its active CLI session", async () => {
+  let now = Date.now();
+  const store = createStore({ dbPath: ":memory:", now: () => now });
+  const task = store.createTask({ text: "Connect another account", stage: "waiting_auth", status: "waiting" });
+  const logins = [];
+  const resumed = [];
+  const broker = createAuthBroker({
+    store, locate: () => "gh.exe",
+    onAuthResolved: info => resumed.push(info),
+    spawnFn(file, args) {
+      const child = new EventEmitter();
+      if (args[1] === "status") {
+        setImmediate(() => child.emit("close", 1));
+        return child;
+      }
+      child.stdout = new PassThrough();
+      child.stderr = new PassThrough();
+      child.stdin = new Writable({
+        write(chunk, encoding, callback) {
+          assert.equal(chunk.toString(), "\n");
+          callback();
+        },
+      });
+      const attempt = { child, killed: false };
+      logins.push(attempt);
+      child.kill = () => {
+        attempt.killed = true;
+        setImmediate(() => child.emit("close", 1));
+      };
+      const code = `ABCD-000${logins.length}`;
+      setImmediate(() => child.stderr.write(`Copy your one-time code: \x1b[33m${code}\x1b[0m\n`));
+      return child;
+    },
+  });
+  try {
+    const first = await broker.requestAuth({ taskId: task.id, service: "github" });
+    assert.equal(first.link, "https://github.com/login/device");
+    assert.equal(first.code, "ABCD-0001");
+    assert.ok(first.expiresAt > now && first.expiresAt <= now + 900000);
+    assert.equal((await broker.requestAuth({ service: "github" })).id, first.id);
+    const second = await broker.requestAuth({ service: "github", replaceApprovalId: first.id });
+    assert.equal(logins[0].killed, true);
+    assert.equal(store.getApproval(first.id).answerValue, "expired");
+    assert.equal(second.code, "ABCD-0002");
+    assert.equal(second.taskId, task.id);
+    assert.equal((await broker.requestAuth({ service: "github", replaceApprovalId: first.id })).id, second.id);
+
+    now = second.expiresAt + 1;
+    assert.equal(store.listOpenApprovals({ kind: "auth" }).length, 0);
+    const third = await broker.requestAuth({ service: "github" });
+    assert.equal(logins[1].killed, true);
+    assert.equal(third.code, "ABCD-0003");
+    logins[2].child.emit("close", 0);
+    assert.deepEqual(resumed.map(info => info.taskId), [task.id]);
+    assert.equal(store.getApproval(third.id).answerValue, "signed_in");
+  } finally {
+    broker.stop();
+    store.close();
+  }
+});
+
 test("bidirectional Muse/GrokBot intake supports reply relay, locked briefs, OpenAPI spec, and blocks forged text approvals", () => {
   const tmp = mkTmp("aios-v2-conn-");
   try {
